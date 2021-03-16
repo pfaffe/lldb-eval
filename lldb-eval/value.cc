@@ -148,7 +148,8 @@ bool Type::IsPromotableIntegerType() {
 }
 
 bool Type::IsContextuallyConvertibleToBool() {
-  return IsScalar() || IsUnscopedEnum() || IsPointerType() || IsNullPtrType();
+  return IsScalar() || IsUnscopedEnum() || IsPointerType() || IsNullPtrType() ||
+         IsArrayType();
 }
 
 lldb::SBType Type::GetEnumerationIntegerType(lldb::SBTarget target) {
@@ -204,6 +205,9 @@ bool Value::GetBool() {
   }
   if (IsFloat()) {
     return GetFloat().isNonZero();
+  }
+  if (type_.IsArrayType()) {
+    return AddressOf().GetUInt64() != 0;
   }
   // Either invalid value, or some complex SbValue (e.g. struct or class).
   return false;
