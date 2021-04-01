@@ -59,7 +59,8 @@ enum class TypeKind : unsigned char {
   VoidPointerType,
   NullptrType,
   EnumType,
-  EnumLast = EnumType,
+  ArrayType,
+  EnumLast = ArrayType,
 };
 inline constexpr size_t NUM_GEN_TYPE_KINDS = (size_t)TypeKind::EnumLast + 1;
 
@@ -166,8 +167,9 @@ struct GenConfig {
       {1.0f, 0.0f},  // TypeKind::TaggedType
       {1.0f, 0.1f},  // TypeKind::PointerType
       {1.0f, 0.1f},  // TypeKind::VoidPointerType
-      {0.2f, 0.2f},  // TypeKind::NullptrType
+      {0.2f, 0.0f},  // TypeKind::NullptrType
       {1.0f, 0.0f},  // TypeKind::EnumType
+      {1.0f, 0.1f},  // TypeKind::ArrayType
   }};
 };
 
@@ -205,6 +207,8 @@ class GeneratorRng {
       const std::vector<std::reference_wrapper<const EnumConstant>>& enums) = 0;
   virtual Function pick_function(
       const std::vector<std::reference_wrapper<const Function>>& functions) = 0;
+  virtual ArrayType pick_array_type(
+      const std::vector<std::reference_wrapper<const ArrayType>>& types) = 0;
 };
 
 class DefaultGeneratorRng : public GeneratorRng {
@@ -245,6 +249,9 @@ class DefaultGeneratorRng : public GeneratorRng {
       override;
   Function pick_function(
       const std::vector<std::reference_wrapper<const Function>>& functions)
+      override;
+  ArrayType pick_array_type(
+      const std::vector<std::reference_wrapper<const ArrayType>>& types)
       override;
 
  private:
@@ -292,15 +299,19 @@ class ExprGenerator {
       const Weights& weights, const ExprConstraints& constraints);
 
   std::optional<Type> gen_type(const Weights& weights,
-                               const TypeConstraints& constraints);
+                               const TypeConstraints& constraints,
+                               bool allow_array_types = false);
   std::optional<QualifiedType> gen_qualified_type(
-      const Weights& weights, const TypeConstraints& constraints);
+      const Weights& weights, const TypeConstraints& constraints,
+      bool allow_array_types = false);
   std::optional<Type> gen_pointer_type(const Weights& weights,
-                                       const TypeConstraints& constraints);
+                                       const TypeConstraints& constraints,
+                                       bool allow_array_types = false);
   std::optional<Type> gen_void_pointer_type(const TypeConstraints& constraints);
   std::optional<Type> gen_tagged_type(const TypeConstraints& constraints);
   std::optional<Type> gen_scalar_type(const TypeConstraints& constraints);
   std::optional<Type> gen_enum_type(const TypeConstraints& constraints);
+  std::optional<Type> gen_array_type(const TypeConstraints& constraints);
   CvQualifiers gen_cv_qualifiers();
 
   std::optional<Expr> gen_with_weights(const Weights& weights,
