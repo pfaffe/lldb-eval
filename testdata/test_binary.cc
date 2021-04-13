@@ -786,6 +786,25 @@ void TestMemberFunctionCall() {
   // BREAK(TestMemberFunctionCall)
 }
 
+void TestCompositeAssignment() {
+  int i = 10;
+  float f = 1.5f;
+  float* p = &f;
+
+  enum Enum { ONE, TWO };
+  Enum eOne = ONE;
+  Enum eTwo = TWO;
+
+  // BREAK(TestAssignment)
+  // BREAK(TestCompositeAssignmentInvalid)
+  // BREAK(TestCompositeAssignmentAdd)
+  // BREAK(TestCompositeAssignmentSub)
+  // BREAK(TestCompositeAssignmentMul)
+  // BREAK(TestCompositeAssignmentDiv)
+  // BREAK(TestCompositeAssignmentRem)
+  // BREAK(TestCompositeAssignmentBitwise)
+}
+
 namespace test_binary {
 
 void main() {
@@ -823,6 +842,7 @@ void main() {
   TestArrayDereference();
   TestDereferencedType();
   TestMemberFunctionCall();
+  TestCompositeAssignment();
 
   // BREAK HERE
 }
