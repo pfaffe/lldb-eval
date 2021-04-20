@@ -2276,7 +2276,7 @@ ExprResult Parser::BuildIncrementDecrement(UnaryOpKind kind, ExprResult rhs,
     return std::make_unique<ErrorNode>();
   }
   if (!rhs->is_context_var()) {
-    BailOut(ErrorCode::kInvalidOperandType,
+    BailOut(ErrorCode::kNotImplemented,
             llvm::formatv("side effects are not supported in this context: "
                           "trying to modify data at the target process"),
             location);
@@ -2773,7 +2773,7 @@ lldb::SBType Parser::PrepareCompositeAssignment(
     return kInvalidType;
   }
   if (!lhs->is_context_var()) {
-    BailOut(ErrorCode::kInvalidOperandType,
+    BailOut(ErrorCode::kNotImplemented,
             llvm::formatv("side effects are not supported in this context: "
                           "trying to modify data at the target process"),
             location);
