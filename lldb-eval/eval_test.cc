@@ -2211,15 +2211,16 @@ TEST_F(EvalTest, TestCompositeAssignmentBitwise) {
       EvalWithContext("$f ^= 1", vars_),
       IsError("invalid operands to binary expression ('float' and 'int')"));
   EXPECT_THAT(
-      EvalWithContext("$f << 1", vars_),
+      EvalWithContext("$f <<= 1", vars_),
       IsError("invalid operands to binary expression ('float' and 'int')"));
   EXPECT_THAT(
-      EvalWithContext("$f >> 1", vars_),
+      EvalWithContext("$f >>= 1", vars_),
       IsError("invalid operands to binary expression ('float' and 'int')"));
 
   ASSERT_TRUE(CreateContextVariable("$s", "(short)100"));
-  EXPECT_THAT(EvalWithContext("$s >> 12", vars_), IsEqual("0"));
-  EXPECT_THAT(EvalWithContext("$s << 24", vars_), IsEqual("1677721600"));
+  EXPECT_THAT(EvalWithContext("$s >>= 2", vars_), IsEqual("25"));
+  EXPECT_THAT(EvalWithContext("$s <<= 6", vars_), IsEqual("1600"));
+  EXPECT_THAT(EvalWithContext("$s <<= 12", vars_), IsEqual("0"));
 
   ASSERT_TRUE(CreateContextVariable("$p", "(int*)10"));
   EXPECT_THAT(
@@ -2232,10 +2233,10 @@ TEST_F(EvalTest, TestCompositeAssignmentBitwise) {
       EvalWithContext("$p ^= &f", vars_),
       IsError("invalid operands to binary expression ('int *' and 'float *')"));
   EXPECT_THAT(
-      EvalWithContext("$p << 1", vars_),
+      EvalWithContext("$p <<= 1", vars_),
       IsError("invalid operands to binary expression ('int *' and 'int')"));
   EXPECT_THAT(
-      EvalWithContext("$p >> $p", vars_),
+      EvalWithContext("$p >>= $p", vars_),
       IsError("invalid operands to binary expression ('int *' and 'int *')"));
 }
 
