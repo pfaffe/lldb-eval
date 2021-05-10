@@ -19,12 +19,16 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <random>
+#include <stack>
 #include <unordered_map>
 
 #include "tools/fuzzer/ast.h"
 #include "tools/fuzzer/enum_bitset.h"
+#include "tools/fuzzer/gen_node.h"
+#include "tools/fuzzer/rng.h"
 #include "tools/fuzzer/symbol_table.h"
 
 namespace fuzzer {
@@ -215,11 +219,14 @@ class GeneratorRng {
       const std::vector<std::reference_wrapper<const Function>>& functions) = 0;
   virtual ArrayType pick_array_type(
       const std::vector<std::reference_wrapper<const ArrayType>>& types) = 0;
+
+  virtual void set_rng_callback(std::function<void(rand_t)>) {}
 };
 
+template <class Rng>
 class DefaultGeneratorRng : public GeneratorRng {
  public:
-  explicit DefaultGeneratorRng(uint32_t seed) : rng_(seed) {}
+  explicit DefaultGeneratorRng(Rng rng) : rng_(std::move(rng)) {}
 
   BinOp gen_bin_op(BinOpMask mask) override;
   UnOp gen_un_op(UnOpMask mask) override;
@@ -261,19 +268,39 @@ class DefaultGeneratorRng : public GeneratorRng {
       const std::vector<std::reference_wrapper<const ArrayType>>& types)
       override;
 
+  void set_rng_callback(std::function<void(rand_t)> callback) override {
+    rng_.set_callback(std::move(callback));
+  }
+
  private:
-  std::mt19937 rng_;
+  Rng rng_;
 };
 
 class ExprGenerator {
  public:
   ExprGenerator(std::unique_ptr<GeneratorRng> rng, GenConfig cfg,
                 SymbolTable symtab)
-      : rng_(std::move(rng)),
-        cfg_(std::move(cfg)),
-        symtab_(std::move(symtab)) {}
+      : rng_(std::move(rng)), cfg_(std::move(cfg)), symtab_(std::move(symtab)) {
+    rng_->set_rng_callback([this](rand_t value) { on_consume_random(value); });
+  }
+
+  // Copying and moving isn't possible right now.
+  // TODO: Implement copy/move constructors/assignments if needed.
+  ExprGenerator(const ExprGenerator&) = delete;
+  ExprGenerator(ExprGenerator&&) = delete;
+  ExprGenerator& operator=(const ExprGenerator&) = delete;
+  ExprGenerator& operator=(ExprGenerator&&) = delete;
 
   std::optional<Expr> generate();
+
+  // Re-evaluates a method, resulting with a different subtree.
+  // Changes are applied only if the node is valid and the re-evaluation results
+  // with a valid expression.
+  bool mutate_gen_node(std::shared_ptr<GenNode>& node);
+
+  // Method generation node. Note that this represents the last call to a
+  // expression generation method and will be rewritten after each such call.
+  std::shared_ptr<GenNode> node() const { return node_; }
 
  private:
   Expr maybe_parenthesized(Expr expr);
@@ -307,6 +334,50 @@ class ExprGenerator {
   std::optional<Expr> gen_sizeof_expr(const Weights& weights,
                                       const ExprConstraints& constraints);
 
+  std::optional<Expr> gen_with_weights(const Weights& weights,
+                                       const ExprConstraints& constraints);
+
+  // Implementations of expression generation methods:
+  std::optional<Expr> gen_boolean_constant_impl(
+      const ExprConstraints& constraints);
+  std::optional<Expr> gen_integer_constant_impl(
+      const ExprConstraints& constraints);
+  std::optional<Expr> gen_double_constant_impl(
+      const ExprConstraints& constraints);
+  std::optional<Expr> gen_enum_constant_impl(
+      const ExprConstraints& constraints);
+  std::optional<Expr> gen_variable_expr_impl(
+      const ExprConstraints& constraints);
+  std::optional<Expr> gen_binary_expr_impl(const Weights& weights,
+                                           const ExprConstraints& constraints);
+  std::optional<Expr> gen_unary_expr_impl(const Weights& weights,
+                                          const ExprConstraints& constraints);
+  std::optional<Expr> gen_ternary_expr_impl(const Weights& weights,
+                                            const ExprConstraints& constraints);
+  std::optional<Expr> gen_cast_expr_impl(const Weights& weights,
+                                         const ExprConstraints& constraints);
+  std::optional<Expr> gen_dereference_expr_impl(
+      const Weights& weights, const ExprConstraints& constraints);
+  std::optional<Expr> gen_address_of_expr_impl(
+      const Weights& weights, const ExprConstraints& constraints);
+  std::optional<Expr> gen_member_of_expr_impl(
+      const Weights& weights, const ExprConstraints& constraints);
+  std::optional<Expr> gen_member_of_ptr_expr_impl(
+      const Weights& weights, const ExprConstraints& constraints);
+  std::optional<Expr> gen_array_index_expr_impl(
+      const Weights& weights, const ExprConstraints& constraints);
+  std::optional<Expr> gen_function_call_expr_impl(
+      const Weights& weights, const ExprConstraints& constraints);
+  std::optional<Expr> gen_sizeof_expr_impl(const Weights& weights,
+                                           const ExprConstraints& constraints);
+  std::optional<Expr> gen_with_weights_impl(const Weights& weights,
+                                            const ExprConstraints& constraints);
+
+  // Generates an expression using the `callback` method and constructs a
+  // generation node on top of the `stack_`.
+  std::optional<Expr> gen_expr(const GenerateExprFn& callback,
+                               std::string name);
+
   std::optional<Type> gen_type(const Weights& weights,
                                const TypeConstraints& constraints,
                                bool allow_array_types = false);
@@ -323,13 +394,15 @@ class ExprGenerator {
   std::optional<Type> gen_array_type(const TypeConstraints& constraints);
   CvQualifiers gen_cv_qualifiers();
 
-  std::optional<Expr> gen_with_weights(const Weights& weights,
-                                       const ExprConstraints& constraints);
+  void on_consume_random(rand_t value);
 
  private:
   std::unique_ptr<GeneratorRng> rng_;
   GenConfig cfg_;
   SymbolTable symtab_;
+
+  std::stack<std::shared_ptr<GenNode>> stack_;
+  std::shared_ptr<GenNode> node_;
 };
 
 }  // namespace fuzzer
