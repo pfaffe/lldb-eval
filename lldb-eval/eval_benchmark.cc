@@ -12,7 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#ifdef _WIN32
 #include <filesystem>
+#else
+#include <errno.h>  // for `program_invocation_name`
+#endif
+
 #include <memory>
 
 #include "benchmark/benchmark.h"
@@ -28,21 +33,19 @@
 
 using bazel::tools::cpp::runfiles::Runfiles;
 
-class DebuggerFixture : public benchmark::Fixture {
+class BM : public benchmark::Fixture {
  public:
-  void SetUp(const ::benchmark::State&) {
-    auto cwd = std::filesystem::current_path();
-
+  void SetUp(::benchmark::State&) override {
 #ifdef _WIN32
-    auto argv0 = cwd.parent_path().append("eval_benchmark.exe");
+    auto cwd = std::filesystem::current_path();
+    std::string argv0 = cwd.parent_path().append("eval_benchmark.exe").string();
 #else
-    auto argv0 = cwd.parent_path().append("eval_benchmark");
+    std::string argv0 = program_invocation_name;
 #endif
 
-    runfiles.reset(Runfiles::Create(argv0.string()));
+    runfiles.reset(Runfiles::Create(argv0));
 
     lldb_eval::SetupLLDBServerEnv(*runfiles);
-    lldb::SBDebugger::Initialize();
 
     auto binary_path =
         runfiles->Rlocation("lldb_eval/testdata/benchmark_binary");
@@ -55,10 +58,9 @@ class DebuggerFixture : public benchmark::Fixture {
     frame = process.GetSelectedThread().GetSelectedFrame();
   }
 
-  void TearDown(::benchmark::State&) {
+  void TearDown(::benchmark::State&) override {
     process.Destroy();
     lldb::SBDebugger::Destroy(debugger);
-    lldb::SBDebugger::Terminate();
   }
 
   lldb::SBDebugger debugger;
@@ -68,7 +70,7 @@ class DebuggerFixture : public benchmark::Fixture {
   std::unique_ptr<Runfiles> runfiles;
 };
 
-BENCHMARK_F(DebuggerFixture, AddTwoNumbers)(benchmark::State& state) {
+BENCHMARK_F(BM, AddTwoNumbers)(benchmark::State& state) {
   for (auto _ : state) {
     lldb::SBError error;
     lldb_eval::EvaluateExpression(frame, "1 + 1", error);
@@ -79,7 +81,7 @@ BENCHMARK_F(DebuggerFixture, AddTwoNumbers)(benchmark::State& state) {
   }
 }
 
-BENCHMARK_F(DebuggerFixture, ArrayDereference)(benchmark::State& state) {
+BENCHMARK_F(BM, ArrayDereference)(benchmark::State& state) {
   for (auto _ : state) {
     lldb::SBError error;
     lldb_eval::EvaluateExpression(frame, "*arr", error);
@@ -90,7 +92,7 @@ BENCHMARK_F(DebuggerFixture, ArrayDereference)(benchmark::State& state) {
   }
 }
 
-BENCHMARK_F(DebuggerFixture, ArraySubscript)(benchmark::State& state) {
+BENCHMARK_F(BM, ArraySubscript)(benchmark::State& state) {
   for (auto _ : state) {
     lldb::SBError error;
     lldb_eval::EvaluateExpression(frame, "arr[0]", error);
@@ -101,6 +103,15 @@ BENCHMARK_F(DebuggerFixture, ArraySubscript)(benchmark::State& state) {
   }
 }
 
-#undef SKIP_IF_ERROR
+int main(int argc, char** argv) {
+  lldb::SBDebugger::Initialize();
 
-BENCHMARK_MAIN();
+  // Same as BENCHMARK_MAIN()
+  // clang-format off
+  ::benchmark::Initialize(&argc, argv);
+  if (::benchmark::ReportUnrecognizedArguments(argc, argv)) return 1;
+  ::benchmark::RunSpecifiedBenchmarks();
+  // clang-format on
+
+  lldb::SBDebugger::Terminate();
+}
