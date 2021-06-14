@@ -331,7 +331,8 @@ static llvm::APFloat CreateAPFloatFromAPFloat(llvm::APFloat value,
   }
 }
 
-Value CastScalarToBasicType(lldb::SBTarget target, Value val, Type type) {
+Value CastScalarToBasicType(lldb::SBTarget target, Value val, Type type,
+                            Error& error) {
   assert(type.IsScalar() && "target type must be an scalar");
   assert(val.type().IsScalar() && "argument must be a scalar");
 
@@ -352,8 +353,15 @@ Value CastScalarToBasicType(lldb::SBTarget target, Value val, Type type) {
     if (val.type().IsFloat()) {
       llvm::APSInt integer(type.GetByteSize() * CHAR_BIT, !type.IsSigned());
       bool is_exact;
-      val.GetFloat().convertToInteger(integer, llvm::APFloat::rmTowardZero,
-                                      &is_exact);
+      llvm::APFloatBase::opStatus status = val.GetFloat().convertToInteger(
+          integer, llvm::APFloat::rmTowardZero, &is_exact);
+
+      // Casting floating point values that are out of bounds of the target type
+      // is undefined behaviour.
+      if (status & llvm::APFloatBase::opInvalidOp) {
+        error.SetUbStatus(UbStatus::kInvalidCast);
+      }
+
       return CreateValueFromAPInt(target, integer, type);
     }
   }
@@ -420,14 +428,23 @@ Value CastIntegerOrEnumToEnumType(lldb::SBTarget target, Value val, Type type) {
   return CreateValueFromAPInt(target, ext, type);
 }
 
-Value CastFloatToEnumType(lldb::SBTarget target, Value val, Type type) {
+Value CastFloatToEnumType(lldb::SBTarget target, Value val, Type type,
+                          Error& error) {
   assert(type.IsEnum() && "target type must be an enum");
   assert(val.type().IsFloat() && "argument must be a float");
 
   llvm::APSInt integer(type.GetByteSize() * CHAR_BIT, !type.IsSigned());
   bool is_exact;
-  val.GetFloat().convertToInteger(integer, llvm::APFloat::rmTowardZero,
-                                  &is_exact);
+
+  llvm::APFloatBase::opStatus status = val.GetFloat().convertToInteger(
+      integer, llvm::APFloat::rmTowardZero, &is_exact);
+
+  // Casting floating point values that are out of bounds of the target type
+  // is undefined behaviour.
+  if (status & llvm::APFloatBase::opInvalidOp) {
+    error.SetUbStatus(UbStatus::kInvalidCast);
+  }
+
   return CreateValueFromAPInt(target, integer, type);
 }
 
