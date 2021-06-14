@@ -26,7 +26,7 @@ This document contains a list of patches for `LLDB` that are required (or recomm
 
   Git commit: [1432ae57bf6e4022b6f4541c9225674ee6b19c23](https://github.com/llvm/llvm-project/commit/1432ae57bf6e4022b6f4541c9225674ee6b19c23)
 
-* `[lldb] Encode bool as unsigned int`
+* (Required) `[lldb] Encode bool as unsigned int`
 
   > `bool` is considered to be unsigned according to `std::is_unsigned<bool>::value` (and `Type::GetTypeInfo`). Encoding it as signed int works fine for normal variables and fields, but breaks when reading the values of boolean bitfields. If the field is declared as `bool b : 1` and has a value of `0b1`, the call to `SBValue::GetValueAsSigned()` will return `-1`.
 
