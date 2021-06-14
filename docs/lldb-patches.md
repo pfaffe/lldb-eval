@@ -4,9 +4,7 @@ This document contains a list of patches for `LLDB` that are required (or recomm
 
 * (Required) `[LLDB] Fix how ValueObjectVariable handles DW_AT_const_value when the DWARFExpression holds the data that represents a constant value`
 
-  > In some cases when we have a DW_AT_const_value and the data can be found in the
-DWARFExpression then ValueObjectVariable does not handle it properly and we end
-up with an extracting data from value failed error.
+  > In some cases when we have a DW_AT_const_value and the data can be found in the DWARFExpression then ValueObjectVariable does not handle it properly and we end up with an extracting data from value failed error.
 
   Differential revision: <https://reviews.llvm.org/D86311>
 
@@ -27,6 +25,14 @@ up with an extracting data from value failed error.
   Differential revision: <https://reviews.llvm.org/D93696>
 
   Git commit: [1432ae57bf6e4022b6f4541c9225674ee6b19c23](https://github.com/llvm/llvm-project/commit/1432ae57bf6e4022b6f4541c9225674ee6b19c23)
+
+* `[lldb] Encode bool as unsigned int`
+
+  > `bool` is considered to be unsigned according to `std::is_unsigned<bool>::value` (and `Type::GetTypeInfo`). Encoding it as signed int works fine for normal variables and fields, but breaks when reading the values of boolean bitfields. If the field is declared as `bool b : 1` and has a value of `0b1`, the call to `SBValue::GetValueAsSigned()` will return `-1`.
+
+  Differential revision: <https://reviews.llvm.org/D102685>
+
+  Git commit: [0bab7b26f4d9dc4cb8f6c2877ad4a2c388c41c65](https://github.com/llvm/llvm-project/commit/0bab7b26f4d9dc4cb8f6c2877ad4a2c388c41c65)
 
 * `[lldb] Lookup static const members in FindGlobalVariables`
 
