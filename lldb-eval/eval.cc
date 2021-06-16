@@ -210,6 +210,7 @@ void Interpreter::Visit(const IdentifierNode* node) {
     // TODO(werat): LLDB canonizes the type upon a dereference. This looks like
     // a bug, but for now we need to mitigate it. Check if the resulting type is
     // incorrect and fix it up.
+    // Not necessary if https://reviews.llvm.org/D103532 is available.
     lldb::SBType deref_type = val.type().GetDereferencedType();
     val = val.Dereference();
 
