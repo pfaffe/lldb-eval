@@ -28,7 +28,7 @@
 #include "tools/fuzzer/ast.h"
 #include "tools/fuzzer/enum_bitset.h"
 #include "tools/fuzzer/gen_node.h"
-#include "tools/fuzzer/rng.h"
+#include "tools/fuzzer/libfuzzer_utils.h"
 #include "tools/fuzzer/symbol_table.h"
 
 namespace fuzzer {
@@ -235,13 +235,12 @@ class GeneratorRng {
   virtual ArrayType pick_array_type(
       const std::vector<std::reference_wrapper<const ArrayType>>& types) = 0;
 
-  virtual void set_rng_callback(std::function<void(rand_t)>) {}
+  virtual void set_rng_callback(std::function<void(uint8_t)>) {}
 };
 
-template <class Rng>
 class DefaultGeneratorRng : public GeneratorRng {
  public:
-  explicit DefaultGeneratorRng(Rng rng) : rng_(std::move(rng)) {}
+  explicit DefaultGeneratorRng(unsigned seed) : rng_(seed) {}
 
   BinOp gen_bin_op(BinOpMask mask) override;
   UnOp gen_un_op(UnOpMask mask) override;
@@ -283,12 +282,14 @@ class DefaultGeneratorRng : public GeneratorRng {
       const std::vector<std::reference_wrapper<const ArrayType>>& types)
       override;
 
-  void set_rng_callback(std::function<void(rand_t)> callback) override {
-    rng_.set_callback(std::move(callback));
+  void set_rng_callback(std::function<void(uint8_t)> callback) override {
+    writer_.set_callback(std::move(callback));
   }
 
  private:
-  Rng rng_;
+  std::mt19937 rng_;
+
+  LibfuzzerWriter writer_;
 };
 
 class ExprGenerator {
@@ -296,7 +297,7 @@ class ExprGenerator {
   ExprGenerator(std::unique_ptr<GeneratorRng> rng, GenConfig cfg,
                 SymbolTable symtab)
       : rng_(std::move(rng)), cfg_(std::move(cfg)), symtab_(std::move(symtab)) {
-    rng_->set_rng_callback([this](rand_t value) { on_consume_random(value); });
+    rng_->set_rng_callback([this](uint8_t byte) { on_consume_byte(byte); });
   }
 
   // Copying and moving isn't possible right now.
@@ -409,7 +410,7 @@ class ExprGenerator {
   std::optional<Type> gen_array_type(const TypeConstraints& constraints);
   CvQualifiers gen_cv_qualifiers();
 
-  void on_consume_random(rand_t value);
+  void on_consume_byte(uint8_t byte);
 
  private:
   std::unique_ptr<GeneratorRng> rng_;

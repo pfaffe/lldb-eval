@@ -16,7 +16,6 @@
 
 #include <memory>
 #include <optional>
-#include <queue>
 #include <random>
 #include <sstream>
 #include <variant>
@@ -31,8 +30,8 @@
 #include "lldb/API/SBThread.h"
 #include "tools/cpp/runfiles/runfiles.h"
 #include "tools/fuzzer/expr_gen.h"
+#include "tools/fuzzer/fixed_rng.h"
 #include "tools/fuzzer/gen_node.h"
-#include "tools/fuzzer/rng.h"
 
 using namespace fuzzer;
 using namespace testing;
@@ -65,18 +64,18 @@ std::shared_ptr<GenNode> pick_random_node(std::shared_ptr<GenNode> root,
   return picker.pick(rng);
 }
 
-// Generation tree visitor used to extract a sequence produced by RNG.
+// Generation tree visitor used to extract a byte sequence.
 class SequenceBuilder : public GenTreeVisitor {
  public:
-  void visit_random_value(rand_t value) { queue_.push(value); }
+  void visit_byte(uint8_t value) { queue_.emplace_back(value); }
 
-  std::queue<rand_t>& queue() { return queue_; }
+  std::vector<uint8_t>& queue() { return queue_; }
 
  private:
-  std::queue<rand_t> queue_;
+  std::vector<uint8_t> queue_;
 };
 
-std::queue<rand_t> make_rng_sequence(std::shared_ptr<GenNode> root) {
+std::vector<uint8_t> make_rng_sequence(std::shared_ptr<GenNode> root) {
   SequenceBuilder builder;
   walk_gen_tree(root, &builder);
   return builder.queue();
@@ -93,8 +92,8 @@ bool compare_gen_nodes(const std::shared_ptr<GenNode>& lhs,
     const auto& lhs_child = lhs->children()[i];
     const auto& rhs_child = rhs->children()[i];
 
-    const auto* lhs_child_int = std::get_if<rand_t>(&lhs_child);
-    const auto* rhs_child_int = std::get_if<rand_t>(&rhs_child);
+    const auto* lhs_child_int = std::get_if<uint8_t>(&lhs_child);
+    const auto* rhs_child_int = std::get_if<uint8_t>(&rhs_child);
     if ((lhs_child_int == nullptr) != (rhs_child_int == nullptr)) {
       return false;
     }
@@ -136,9 +135,8 @@ TEST(MutateTest, MutateMultipleTimes) {
   SymbolTable symtab = SymbolTable::create_from_frame(frame);
 
   // Create a random expression generator.
-  ExprGenerator random_generator(
-      std::make_unique<DefaultGeneratorRng<Mt19937>>(Mt19937(1337)), cfg,
-      symtab);
+  ExprGenerator random_generator(std::make_unique<DefaultGeneratorRng>(1337),
+                                 cfg, symtab);
 
   // Create an initial expression.
   std::optional<Expr> maybe_expr;
@@ -161,19 +159,18 @@ TEST(MutateTest, MutateMultipleTimes) {
     // Re-evaluate the node.
     random_generator.mutate_gen_node(to_be_mutated);
 
-    // Construct expression generator over the fixed rng sequence.
-    std::queue<rand_t> rng_sequence = make_rng_sequence(root);
+    // Construct expression generator over the fixed byte sequence.
+    std::vector<uint8_t> bytes = make_rng_sequence(root);
     ExprGenerator fixed_generator(
-        std::make_unique<DefaultGeneratorRng<FixedRng>>(
-            FixedRng(std::move(rng_sequence))),
-        cfg, symtab);
+        std::make_unique<FixedGeneratorRng>(bytes.data(), bytes.size()), cfg,
+        symtab);
 
     // Fixed expression generator should be able to generate an expression.
     maybe_expr = fixed_generator.generate();
     ASSERT_NE(maybe_expr, std::nullopt);
 
     // Compare mutated root gen-node with the root gen-node obtained by running
-    // the expression generator over the fixed random sequence.
+    // the expression generator over the fixed byte sequence.
     ASSERT_TRUE(compare_gen_nodes(root, fixed_generator.node()));
   }
 
