@@ -72,3 +72,29 @@ Current workaround in `lldb-eval` -- <https://github.com/google/lldb-eval/commit
 ```
 
 Discussion in Phabricator -- <https://reviews.llvm.org/D98370>
+
+## Incorrect integral promotions for enumerations
+
+```c++
+enum E : uint8_t {
+  eZero,
+};
+```
+
+```c++
+* thread #1, name = 'a.out', stop reason = step in
+    frame #0: 0x0000000000401124 a.out`main at enum.cc:9:3
+   6   
+   7    int main() {
+   8      auto x = E::eZero << 1;
+-> 9      return 0;
+   10   }
+(lldb) p x
+(int) $0 = 0
+(lldb) p E::eZero << 1
+(unsigned int) $1 = 0
+```
+
+`uint8_t` should be promoted to `int`, but the expression evaluator returns `unsigned int`.
+
+Discussion on #lldb channel -- <https://discord.com/channels/636084430946959380/636732809708306432/860112842266640424>
