@@ -2132,6 +2132,16 @@ TEST_F(EvalTest, TestAssignment) {
   EXPECT_THAT(EvalWithContext("$p = (int*)12", vars_),
               IsEqual("0x000000000000000c"));
   EXPECT_THAT(EvalWithContext("$p", vars_), IsEqual("0x000000000000000c"));
+  EXPECT_THAT(EvalWithContext("$p = 0", vars_), IsEqual("0x0000000000000000"));
+  EXPECT_THAT(EvalWithContext("$p = nullptr", vars_),
+              IsEqual("0x0000000000000000"));
+
+  ASSERT_TRUE(CreateContextVariableArray("int", "$arr", "{1, 2}"));
+  EXPECT_THAT(EvalWithContext("$p = $arr", vars_), IsOk());
+
+  ASSERT_TRUE(CreateContextVariableArray("float", "$farr", "{1.f, 2.f}"));
+  EXPECT_THAT(EvalWithContext("$p = $farr", vars_),
+              IsError("no known conversion from 'float [2]' to 'int *'"));
 }
 
 TEST_F(EvalTest, TestCompositeAssignmentInvalid) {
