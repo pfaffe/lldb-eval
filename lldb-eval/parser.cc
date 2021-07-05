@@ -2394,10 +2394,13 @@ ExprResult Parser::BuildBinaryOp(BinaryOpKind kind, ExprResult lhs,
     case BinaryOpKind::And:
     case BinaryOpKind::Or:
     case BinaryOpKind::Xor:
-    case BinaryOpKind::Shl:
-    case BinaryOpKind::Shr:
       result_type = PrepareBinaryBitwise(lhs, rhs,
                                          /*is_comp_assign*/ false);
+      break;
+    case BinaryOpKind::Shl:
+    case BinaryOpKind::Shr:
+      result_type = PrepareBinaryShift(lhs, rhs,
+                                       /*is_comp_assign*/ false);
       break;
 
     case BinaryOpKind::EQ:
@@ -2449,10 +2452,13 @@ ExprResult Parser::BuildBinaryOp(BinaryOpKind kind, ExprResult lhs,
     case BinaryOpKind::AndAssign:
     case BinaryOpKind::OrAssign:
     case BinaryOpKind::XorAssign:
-    case BinaryOpKind::ShlAssign:
-    case BinaryOpKind::ShrAssign:
       comp_assign_type = PrepareBinaryBitwise(lhs, rhs,
                                               /*is_comp_assign*/ true);
+      break;
+    case BinaryOpKind::ShlAssign:
+    case BinaryOpKind::ShrAssign:
+      comp_assign_type = PrepareBinaryShift(lhs, rhs,
+                                            /*is_comp_assign*/ true);
       break;
 
     default:
@@ -2469,7 +2475,8 @@ ExprResult Parser::BuildBinaryOp(BinaryOpKind kind, ExprResult lhs,
   // If the result type is valid, then the binary operation is valid!
   if (result_type) {
     return std::make_unique<BinaryOpNode>(location, result_type, kind,
-                                          std::move(lhs), std::move(rhs));
+                                          std::move(lhs), std::move(rhs),
+                                          comp_assign_type);
   }
 
   BailOut(ErrorCode::kInvalidOperandType,
@@ -2616,9 +2623,11 @@ lldb::SBType Parser::PrepareBinaryRemainder(ExprResult& lhs, ExprResult& rhs,
 
 lldb::SBType Parser::PrepareBinaryBitwise(ExprResult& lhs, ExprResult& rhs,
                                           bool is_comp_assign) {
-  // Operations {'&', '|', '^', '>>', '<<'} work for:
+  // Operations {'&', '|', '^'} work for:
   //
-  //  {Integer,unscoped_enum} <-> {Integer,unscoped_enum}
+  //  {integer,unscoped_enum} <-> {integer,unscoped_enum}
+  //
+  // Note that {'<<', '>>'} are handled in a separate method.
 
   Type result_type = UsualArithmeticConversions(ctx_, lhs, rhs, is_comp_assign);
 
@@ -2628,6 +2637,28 @@ lldb::SBType Parser::PrepareBinaryBitwise(ExprResult& lhs, ExprResult& rhs,
 
   // Invalid operands.
   return kInvalidType;
+}
+
+lldb::SBType Parser::PrepareBinaryShift(ExprResult& lhs, ExprResult& rhs,
+                                        bool is_comp_assign) {
+  // Operations {'<<', '>>'} work for:
+  //
+  //  {integer,unscoped_enum} <-> {integer,unscoped_enum}
+
+  if (!is_comp_assign) {
+    lhs = UsualUnaryConversions(ctx_, std::move(lhs));
+  }
+  rhs = UsualUnaryConversions(ctx_, std::move(rhs));
+
+  Type lhs_type = lhs->result_type_deref();
+  Type rhs_type = rhs->result_type_deref();
+
+  if (!lhs_type.IsInteger() || !rhs_type.IsInteger()) {
+    return kInvalidType;
+  }
+
+  // The type of the result is that of the promoted left operand.
+  return DoIntegralPromotion(ctx_, lhs_type);
 }
 
 lldb::SBType Parser::PrepareBinaryComparison(BinaryOpKind kind, ExprResult& lhs,

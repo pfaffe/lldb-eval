@@ -177,6 +177,8 @@ class Parser {
                                       bool is_comp_assign);
   lldb::SBType PrepareBinaryBitwise(ExprResult& lhs, ExprResult& rhs,
                                     bool is_comp_assign);
+  lldb::SBType PrepareBinaryShift(ExprResult& lhs, ExprResult& rhs,
+                                  bool is_comp_assign);
   lldb::SBType PrepareBinaryComparison(BinaryOpKind kind, ExprResult& lhs,
                                        ExprResult& rhs,
                                        clang::SourceLocation location);

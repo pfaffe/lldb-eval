@@ -291,6 +291,10 @@ TEST_F(UbDetectionTest, TestInvalidShift) {
   EXPECT_EQ(GetUbStatus("-1LL >> 10"), UbStatus::kOk);
   EXPECT_EQ(GetUbStatus("100U << 30"), UbStatus::kOk);
   EXPECT_EQ(GetUbStatus("100ULL << 60"), UbStatus::kOk);
+
+  // `char` type is implicitly converted to `int`.
+  EXPECT_EQ(GetUbStatus("(char)1 << 31LL"), UbStatus::kOk);
+  EXPECT_EQ(GetUbStatus("(char)1 << 32LL"), UbStatus::kInvalidShift);
 }
 
 // TODO: Add tests with composite assignments (e.g. `i /= 0`, `i -= fmax`).
