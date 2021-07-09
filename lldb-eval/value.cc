@@ -164,8 +164,20 @@ bool CompareTypes(lldb::SBType lhs, lldb::SBType rhs) {
     return true;
   }
 
-  // TODO(werat): Figure out why the equality doesn't work sometimes. For now
-  // workaround by comparing underlying types for builtins and pointers.
+  // Comparing two lldb::SBType doesn't always work reliably:
+  // https://github.com/google/lldb-eval/blob/master/docs/lldb-bugs.md#comparing-lldbsbtype-objects-representing-the-same-type-doesnt-always-work
+  //
+  // As a workaround we also compare typenames and drill down to the underlying
+  // types to check if two objects refer to the same type.
+
+  // In LLDB the type name is stored as `llvm_private::ConstString`, which
+  // points to global pool of unique strings. The equal names will point to the
+  // same "const char*" object, so we can just check the pointers for equality.
+  if (lhs.GetName() == rhs.GetName()) {
+    return true;
+  }
+
+  // Comparing underlying types for builtins and pointers.
   lldb::BasicType lhs_basic_type = lhs.GetCanonicalType().GetBasicType();
   lldb::BasicType rhs_basic_type = rhs.GetCanonicalType().GetBasicType();
   if (lhs_basic_type != lldb::eBasicTypeInvalid &&
