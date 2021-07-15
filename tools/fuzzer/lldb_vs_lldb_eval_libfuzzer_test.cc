@@ -15,10 +15,12 @@
  */
 
 #include <cassert>
+#include <cstdarg>
 #include <cstdint>
 #include <cstdio>
 #include <memory>
 #include <string>
+#include <unordered_map>
 
 #include "lldb-eval/context.h"
 #include "lldb-eval/eval.h"
@@ -31,6 +33,23 @@
 #include "tools/fuzzer/libfuzzer_common.h"
 
 static fuzzer::LibfuzzerState g_state;
+
+static const char* kLoggingPrefix = "[lldb-eval-fuzzer] ";
+
+// How often to log statistics on UB (e.g. every 500 iterations)?
+static const int kUbStatsPeriod = 500;
+
+extern "C" const char* __lsan_default_options() {
+  return "print_suppressions=0";
+}
+
+// TODO: LSAN suppressions are needed to avoid OSS-Fuzz reports caused by
+// memory leaks in LLDB. Once these leaks are fixed, the function won't be
+// necessary anymore.
+extern "C" const char* __lsan_default_suppressions() {
+  return "leak:printNode(llvm::itanium_demangle::Node const*\n"
+         "leak:llvm::itanium_demangle::initializeOutputStream";
+}
 
 const char* maybe_null(const char* str) {
   return str == nullptr ? "null" : str;
@@ -48,36 +67,70 @@ bool compare_types(lldb::SBType lhs, lldb::SBType rhs) {
   return lhs_str == rhs_str;
 }
 
-void log_expr(const std::string& expr) {
-  fprintf(stderr, "expr: %s\n", expr.c_str());
+void log(const char* format, ...) {
+  fprintf(stderr, kLoggingPrefix);
+  va_list args;
+  va_start(args, format);
+  vfprintf(stderr, format, args);
+  va_end(args);
+  fprintf(stderr, "\n");
 }
+
+void log_separator() {
+  log("=====================================================================");
+}
+
+void log_expr(const std::string& expr) { log("expr: %s", expr.c_str()); }
 
 void log_lldb_eval_error(const std::string& expr, lldb_eval::Error error) {
   log_expr(expr);
-  fprintf(stderr, " cause: lldb-eval error\n");
-  fprintf(stderr, " error: %s\n", error.message().c_str());
+  log(" cause: lldb-eval error\n");
+  log(" error: %s", error.message().c_str());
+  log_separator();
 }
 
 void log_lldb_error(const std::string& expr, lldb::SBError error) {
   log_expr(expr);
-  fprintf(stderr, " cause: lldb error\n");
-  fprintf(stderr, " error: %s\n", error.GetCString());
+  log(" cause: lldb error");
+  log(" error: %s", error.GetCString());
+  log_separator();
 }
 
 void log_type_mismatch(const std::string& expr, const char* lldb_type,
                        const char* lldb_eval_type) {
   log_expr(expr);
-  fprintf(stderr, " cause: type mismatch\n");
-  fprintf(stderr, " lldb type     : %s\n", lldb_type);
-  fprintf(stderr, " lldb-eval type: %s\n", lldb_eval_type);
+  log(" cause: type mismatch");
+  log(" lldb type     : %s", lldb_type);
+  log(" lldb-eval type: %s", lldb_eval_type);
+  log_separator();
 }
 
 void log_value_mismatch(const std::string& expr, const std::string& lldb_value,
                         const std::string& lldb_eval_value) {
   log_expr(expr);
-  fprintf(stderr, " cause: value mismatch\n");
-  fprintf(stderr, " lldb value     : %s\n", lldb_value.c_str());
-  fprintf(stderr, " lldb-eval value: %s\n", lldb_eval_value.c_str());
+  log(" cause: value mismatch");
+  log(" lldb value     : %s", lldb_value.c_str());
+  log(" lldb-eval value: %s", lldb_eval_value.c_str());
+  log_separator();
+}
+
+void report_undefined_behaviour(lldb_eval::UbStatus status) {
+  using lldb_eval::UbStatus;
+  static std::unordered_map<UbStatus, size_t> stats;
+  static size_t count = 0;
+
+  stats[status]++;
+  count++;
+
+  if (count % kUbStatsPeriod == 0) {
+    // Log statistics every `kUbStatsPeriod` iterations.
+    log("UB stats: (kOk: %zu, kDivisionByZero: %zu, kInvalidCast: %zu, "
+        "kInvalidShift: %zu, kNullptrArithmetic: %zu)",
+        stats[UbStatus::kOk], stats[UbStatus::kDivisionByZero],
+        stats[UbStatus::kInvalidCast], stats[UbStatus::kInvalidShift],
+        stats[UbStatus::kNullptrArithmetic]);
+    log_separator();
+  }
 }
 
 extern "C" size_t LLVMFuzzerCustomMutator(uint8_t* data, size_t size,
@@ -108,6 +161,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
   lldb_eval::UbStatus ub_status = err.ub_status();
 
+  // Process statistics on UB.
+  report_undefined_behaviour(ub_status);
+
   // LLDB evaluation.
   lldb::SBExpressionOptions opts;
   opts.SetAutoApplyFixIts(false);
@@ -134,7 +190,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
   if (err.ub_status() != lldb_eval::UbStatus::kOk) {
     // Don't compare values if undefined behaviour was detected.
-    // TODO: Collect statistics on UB distributions.
     return 0;
   }
 
