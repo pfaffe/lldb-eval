@@ -35,7 +35,7 @@ debug information, aiming at sub-millisecond evaluation speed.
 Install the dependencies:
 
 ```bash
-sudo apt install lld-10 clang-10 lldb-10 llvm-10-dev libclang-10-dev liblldb-10-dev
+sudo apt install lld-11 clang-11 lldb-11 llvm-11-dev libclang-11-dev liblldb-11-dev libc++-11-dev libc++abi-11-dev
 ```
 
 Or build them from source, see the instructions in the [LLDB documentation](https://lldb.llvm.org/resources/build.html#id9).
