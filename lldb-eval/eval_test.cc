@@ -1399,6 +1399,13 @@ TEST_F(EvalTest, DISABLED_TestStaticConstDeclaredInline) {
   EXPECT_THAT(Eval("::Vars::static_constexpr"), IsEqual("8"));
   EXPECT_THAT(Eval("Vars::inline_static"), IsEqual("7.5"));
   EXPECT_THAT(Eval("Vars::static_constexpr"), IsEqual("8"));
+
+  EXPECT_THAT(Scope("outer_inner_vars").Eval("inline_static"), IsEqual("1.5"));
+  EXPECT_THAT(Scope("outer_inner_vars").Eval("static_constexpr"), IsEqual("2"));
+  EXPECT_THAT(Scope("outer_vars").Eval("inline_static"), IsEqual("4.5"));
+  EXPECT_THAT(Scope("outer_vars").Eval("static_constexpr"), IsEqual("5"));
+  EXPECT_THAT(Scope("vars").Eval("inline_static"), IsEqual("7.5"));
+  EXPECT_THAT(Scope("vars").Eval("inline_static"), IsEqual("8"));
 }
 
 TEST_F(EvalTest, TestStaticConstDeclaredOutsideTheClass) {
@@ -1413,6 +1420,28 @@ TEST_F(EvalTest, TestStaticConstDeclaredOutsideTheClass) {
   EXPECT_THAT(Eval("outer::Vars::static_const"), IsEqual("6"));
   EXPECT_THAT(Eval("::Vars::static_const"), IsEqual("9"));
   EXPECT_THAT(Eval("Vars::static_const"), IsEqual("9"));
+
+  EXPECT_THAT(Eval("::outer::inner::Vars::Nested::static_const"),
+              IsEqual("10"));
+  EXPECT_THAT(Eval("outer::inner::Vars::Nested::static_const"), IsEqual("10"));
+  EXPECT_THAT(Eval("::outer::Vars::Nested::static_const"), IsEqual("20"));
+  EXPECT_THAT(Eval("outer::Vars::Nested::static_const"), IsEqual("20"));
+  EXPECT_THAT(Eval("::Vars::Nested::static_const"), IsEqual("30"));
+  EXPECT_THAT(Eval("Vars::Nested::static_const"), IsEqual("30"));
+
+  EXPECT_THAT(Scope("outer_inner_vars").Eval("static_const"), IsEqual("3"));
+  EXPECT_THAT(Scope("outer_vars").Eval("static_const"), IsEqual("6"));
+  EXPECT_THAT(Scope("vars").Eval("static_const"), IsEqual("9"));
+
+  EXPECT_THAT(Scope("outer_inner_vars").Eval("Nested::static_const"),
+              IsEqual("10"));
+  EXPECT_THAT(Scope("outer_vars").Eval("Nested::static_const"), IsEqual("20"));
+  EXPECT_THAT(Scope("vars").Eval("Nested::static_const"), IsEqual("30"));
+
+  EXPECT_THAT(Scope("vars").Eval("::static_const"),
+              IsError("use of undeclared identifier '::static_const'"));
+  EXPECT_THAT(Scope("vars").Eval("::Nested::static_const"),
+              IsError("use of undeclared identifier '::Nested::static_const'"));
 }
 
 TEST_F(EvalTest, TestTemplateTypes) {

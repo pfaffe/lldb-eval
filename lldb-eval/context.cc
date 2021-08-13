@@ -221,6 +221,32 @@ lldb::SBType Context::ResolveTypeByName(const std::string& name) const {
   return lldb::SBType();
 }
 
+static lldb::SBValue LookupStaticIdentifier(lldb::SBTarget target,
+                                            const llvm::StringRef& name_ref) {
+  // List global variable with the same "basename". There can be many matches
+  // from other scopes (namespaces, classes), so we do additional filtering
+  // later.
+  lldb::SBValueList values = target.FindGlobalVariables(
+      name_ref.data(), /*max_matches=*/std::numeric_limits<uint32_t>::max());
+
+  // Find the corrent variable by matching the name. lldb::SBValue::GetName()
+  // can return strings like "::globarVar", "ns::i" or "int const ns::foo"
+  // depending on the version and the platform.
+  for (uint32_t i = 0; i < values.GetSize(); ++i) {
+    lldb::SBValue val = values.GetValueAtIndex(i);
+    llvm::StringRef val_name = val.GetName();
+
+    if (val_name == name_ref ||
+        val_name == llvm::formatv("::{0}", name_ref).str() ||
+        val_name.endswith(llvm::formatv(" {0}", name_ref).str()) ||
+        val_name.endswith(llvm::formatv("*{0}", name_ref).str()) ||
+        val_name.endswith(llvm::formatv("&{0}", name_ref).str())) {
+      return val;
+    }
+  }
+  return lldb::SBValue();
+}
+
 lldb::SBValue Context::LookupIdentifier(const std::string& name) const {
   // Lookup context variables first.
   auto context_var = context_vars_.find(name);
@@ -271,27 +297,17 @@ lldb::SBValue Context::LookupIdentifier(const std::string& name) const {
     // resolved relative to the current scope. I.e. if the current frame is in
     // "ns1::ns2::Foo()", then "ns2::x" should resolve to "ns1::ns2::x".
 
-    // List global variable with the same "basename". There can be many matches
-    // from other scopes (namespaces, classes), so we do additional filtering
-    // later.
-    lldb::SBValueList values = ctx_.GetTarget().FindGlobalVariables(
-        name_ref.data(), /*max_matches=*/std::numeric_limits<uint32_t>::max());
+    if (scope_ && !global_scope) {
+      // Try looking for static member of the current scope value, e.g.
+      // `ScopeType::NAME`. NAME can include nested struct (`Nested::SUBNAME`),
+      // but it cannot be part of the global scope (start with "::").
+      std::string name_with_type_prefix =
+          llvm::formatv("{0}::{1}", scope_.GetTypeName(), name_ref).str();
+      value = LookupStaticIdentifier(ctx_.GetTarget(), name_with_type_prefix);
+    }
 
-    // Find the corrent variable by matching the name. lldb::SBValue::GetName()
-    // can return strings like "::globarVar", "ns::i" or "int const ns::foo"
-    // depending on the version and the platform.
-    for (uint32_t i = 0; i < values.GetSize(); ++i) {
-      lldb::SBValue val = values.GetValueAtIndex(i);
-      llvm::StringRef val_name = val.GetName();
-
-      if (val_name == name_ref ||
-          val_name == llvm::formatv("::{0}", name_ref).str() ||
-          val_name.endswith(llvm::formatv(" {0}", name_ref).str()) ||
-          val_name.endswith(llvm::formatv("*{0}", name_ref).str()) ||
-          val_name.endswith(llvm::formatv("&{0}", name_ref).str())) {
-        value = val;
-        break;
-      }
+    if (!value) {
+      value = LookupStaticIdentifier(ctx_.GetTarget(), name_ref);
     }
   }
 
