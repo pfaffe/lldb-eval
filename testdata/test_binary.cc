@@ -966,6 +966,7 @@ void TestUniquePtr() {
   std::unique_ptr<void, decltype(deleter)> ptr_void(new int(42), deleter);
 
   // BREAK(TestUniquePtr)
+  // BREAK(TestUniquePtrDeref)
   // BREAK(TestUniquePtrCompare)
 }
 
@@ -986,6 +987,7 @@ void TestSharedPtr() {
   std::shared_ptr<void> ptr_void = ptr_int;
 
   // BREAK(TestSharedPtr)
+  // BREAK(TestSharedPtrDeref)
   // BREAK(TestSharedPtrCompare)
 }
 
