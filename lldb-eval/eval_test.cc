@@ -156,6 +156,8 @@ void PrintError(::testing::MatchResultListener* listener,
 
 class IsOkMatcher : public MatcherInterface<EvalResult> {
  public:
+  explicit IsOkMatcher(bool compare_types) : compare_types_(compare_types) {}
+
   bool MatchAndExplain(EvalResult result,
                        MatchResultListener* listener) const override {
     if (result.lldb_eval_error.GetError()) {
@@ -179,6 +181,19 @@ class IsOkMatcher : public MatcherInterface<EvalResult> {
                   << "lldb     : " << result.lldb_value.value().GetValue();
         return false;
       }
+
+      if (compare_types_) {
+        const char* lldb_eval_type =
+            result.lldb_eval_value.GetType().GetUnqualifiedType().GetName();
+        const char* lldb_type =
+            result.lldb_value.value().GetType().GetUnqualifiedType().GetName();
+        if (strcmp(lldb_eval_type, lldb_type) != 0) {
+          *listener << "types produced by lldb-eval and LLDB don't match\n"
+                    << "lldb-eval: " << lldb_eval_type << "\n"
+                    << "lldb     : " << lldb_type;
+          return false;
+        }
+      }
     }
 
     return true;
@@ -187,13 +202,19 @@ class IsOkMatcher : public MatcherInterface<EvalResult> {
   void DescribeTo(std::ostream* os) const override {
     *os << "evaluates without an error and equals to LLDB";
   }
+
+ private:
+  bool compare_types_;
 };
 
-Matcher<EvalResult> IsOk() { return MakeMatcher(new IsOkMatcher()); }
+Matcher<EvalResult> IsOk(bool compare_types = true) {
+  return MakeMatcher(new IsOkMatcher(compare_types));
+}
 
 class IsEqualMatcher : public MatcherInterface<EvalResult> {
  public:
-  explicit IsEqualMatcher(std::string value) : value_(std::move(value)) {}
+  IsEqualMatcher(std::string value, bool compare_types)
+      : value_(std::move(value)), compare_types_(compare_types) {}
 
  public:
   bool MatchAndExplain(EvalResult result,
@@ -224,6 +245,19 @@ class IsEqualMatcher : public MatcherInterface<EvalResult> {
                   << "lldb     : " << result.lldb_value.value().GetValue();
         return false;
       }
+
+      if (compare_types_) {
+        const char* lldb_eval_type =
+            result.lldb_eval_value.GetType().GetUnqualifiedType().GetName();
+        const char* lldb_type =
+            result.lldb_value.value().GetType().GetUnqualifiedType().GetName();
+        if (strcmp(lldb_eval_type, lldb_type) != 0) {
+          *listener << "types produced by lldb-eval and LLDB don't match\n"
+                    << "lldb-eval: " << lldb_eval_type << "\n"
+                    << "lldb     : " << lldb_type;
+          return false;
+        }
+      }
     }
 
     return true;
@@ -235,10 +269,11 @@ class IsEqualMatcher : public MatcherInterface<EvalResult> {
 
  private:
   std::string value_;
+  bool compare_types_;
 };
 
-Matcher<EvalResult> IsEqual(std::string value) {
-  return MakeMatcher(new IsEqualMatcher(std::move(value)));
+Matcher<EvalResult> IsEqual(std::string value, bool compare_types = true) {
+  return MakeMatcher(new IsEqualMatcher(std::move(value), compare_types));
 }
 
 class IsErrorMatcher : public MatcherInterface<EvalResult> {
@@ -1073,14 +1108,20 @@ TEST_F(EvalTest, TestSubscript) {
   EXPECT_THAT(Eval("c_arr_ref[enum_ref].field_"), IsEqual("1"));
 
   // Test when base and index are typedefs.
-  EXPECT_THAT(Eval("td_int_arr[0]"), IsEqual("1"));
-  EXPECT_THAT(Eval("td_int_arr[td_int_idx_1]"), IsEqual("2"));
-  EXPECT_THAT(Eval("td_int_arr[td_td_int_idx_2]"), IsEqual("3"));
+  bool compare_types = true;
+#if LLVM_VERSION_MAJOR < 12
+  // Older LLVM versions return canonical types when accessing array elements.
+  compare_types = false;
+#endif
+  EXPECT_THAT(Eval("td_int_arr[0]"), IsEqual("1", compare_types));
+  EXPECT_THAT(Eval("td_int_arr[td_int_idx_1]"), IsEqual("2", compare_types));
+  EXPECT_THAT(Eval("td_int_arr[td_td_int_idx_2]"), IsEqual("3", compare_types));
   EXPECT_THAT(Eval("td_int_ptr[0]"), IsEqual("1"));
   EXPECT_THAT(Eval("td_int_ptr[td_int_idx_1]"), IsEqual("2"));
   EXPECT_THAT(Eval("td_int_ptr[td_td_int_idx_2]"), IsEqual("3"));
   // Both typedefs and refs!
-  EXPECT_THAT(Eval("td_int_arr_ref[td_int_idx_1_ref]"), IsEqual("2"));
+  EXPECT_THAT(Eval("td_int_arr_ref[td_int_idx_1_ref]"),
+              IsEqual("2", compare_types));
 
   // Test for index out of bounds.
   EXPECT_THAT(Eval("int_arr[42]"), IsOk());
@@ -1091,7 +1132,7 @@ TEST_F(EvalTest, TestSubscript) {
   EXPECT_THAT(Eval("int_arr[-42]"), IsOk());
 
   // Test for "max unsigned char".
-  EXPECT_THAT(Eval("uint8_arr[uchar_idx]"), IsEqual("'\\xab'"));
+  EXPECT_THAT(Eval("uint8_arr[uchar_idx]"), IsEqual("'\\xab'", compare_types));
 
   // Test address-of of the subscripted value.
   EXPECT_THAT(Eval("(&c_arr[1])->field_"), IsEqual("1"));
@@ -1689,7 +1730,9 @@ TEST_F(EvalTest, TestBitField) {
   EXPECT_THAT(Eval("0 + bf.c"), IsEqual("0"));
   EXPECT_THAT(Eval("0 + bf.d"), IsEqual("1"));
   EXPECT_THAT(Scope("bf").Eval("0 + a"), IsEqual("1023"));
-  EXPECT_THAT(Scope("bf").Eval("0 + b"), IsEqual("9"));
+  // TODO: Enable type comparison after fixing bitfield promotion in value
+  // context.
+  EXPECT_THAT(Scope("bf").Eval("0 + b"), IsEqual("9", /*compare_types*/ false));
   EXPECT_THAT(Scope("bf").Eval("0 + c"), IsEqual("0"));
   EXPECT_THAT(Scope("bf").Eval("0 + d"), IsEqual("1"));
 
@@ -1947,21 +1990,25 @@ TEST_F(EvalTest, TestUnscopedEnum) {
   EXPECT_THAT(Eval("(UnscopedEnum)(UnscopedEnum)0"), IsEqual("kZero"));
   EXPECT_THAT(Eval("(void*)(UnscopedEnum)1"), IsEqual("0x0000000000000001"));
 
+  bool compare_types = HAS_METHOD(lldb::SBType, GetEnumerationIntegerType());
+
   EXPECT_THAT(Eval("enum_one == 1"), IsEqual("true"));
-  EXPECT_THAT(Eval("enum_one + 1"), IsEqual("2"));
-  EXPECT_THAT(Eval("enum_one * 2"), IsEqual("2"));
-  EXPECT_THAT(Eval("enum_two / 2"), IsEqual("1"));
-  EXPECT_THAT(Eval("enum_one % 2"), IsEqual("1"));
-  EXPECT_THAT(Eval("enum_two & 2"), IsEqual("2"));
-  EXPECT_THAT(Eval("enum_two | 0x01"), IsEqual("3"));
-  EXPECT_THAT(Eval("enum_two ^ 0b11"), IsEqual("1"));
-  EXPECT_THAT(Eval("enum_two >> 1"), IsEqual("1"));
-  EXPECT_THAT(Eval("enum_two << 1"), IsEqual("4"));
+  EXPECT_THAT(Eval("enum_one + 1"), IsEqual("2", compare_types));
+  EXPECT_THAT(Eval("enum_one * 2"), IsEqual("2", compare_types));
+  EXPECT_THAT(Eval("enum_two / 2"), IsEqual("1", compare_types));
+  EXPECT_THAT(Eval("enum_one % 2"), IsEqual("1", compare_types));
+  EXPECT_THAT(Eval("enum_two & 2"), IsEqual("2", compare_types));
+  EXPECT_THAT(Eval("enum_two | 0x01"), IsEqual("3", compare_types));
+  EXPECT_THAT(Eval("enum_two ^ 0b11"), IsEqual("1", compare_types));
+  EXPECT_THAT(Eval("enum_two >> 1"), IsEqual("1", compare_types));
+  EXPECT_THAT(Eval("enum_two << 1"), IsEqual("4", compare_types));
   EXPECT_THAT(Eval("8 >> enum_two"), IsEqual("2"));
   EXPECT_THAT(Eval("1 << enum_two"), IsEqual("4"));
-  EXPECT_THAT(Eval("UnscopedEnumUInt8::kTwoU8 << 1"), IsEqual("4"));
+  // TODO: Enable type comparison after the bug is addressed in LLDB.
+  EXPECT_THAT(Eval("UnscopedEnumUInt8::kTwoU8 << 1"),
+              IsEqual("4", /*compare_types*/ false));
   EXPECT_THAT(Eval("UnscopedEnumInt8::kTwo8 << 1U"), IsEqual("4"));
-  EXPECT_THAT(Eval("+enum_one"), IsEqual("1"));
+  EXPECT_THAT(Eval("+enum_one"), IsEqual("1", compare_types));
   EXPECT_THAT(Eval("!enum_one"), IsEqual("false"));
   EXPECT_THAT(Eval("(int*)1 + enum_one"), IsEqual("0x0000000000000005"));
   EXPECT_THAT(Eval("(int*)5 - enum_one"), IsEqual("0x0000000000000001"));
@@ -1978,18 +2025,18 @@ TEST_F(EvalTest, TestUnscopedEnum) {
   EXPECT_THAT(Eval("enum_one_ref != UnscopedEnum::kTwo"), IsEqual("true"));
   EXPECT_THAT(Eval("enum_one_ref < UnscopedEnum::kTwo"), IsEqual("true"));
   EXPECT_THAT(Eval("enum_one_ref == 1"), IsEqual("true"));
-  EXPECT_THAT(Eval("enum_one_ref + 1"), IsEqual("2"));
-  EXPECT_THAT(Eval("enum_one_ref * 2"), IsEqual("2"));
-  EXPECT_THAT(Eval("enum_two_ref / 2"), IsEqual("1"));
-  EXPECT_THAT(Eval("enum_one_ref % 2"), IsEqual("1"));
-  EXPECT_THAT(Eval("enum_two_ref & 2"), IsEqual("2"));
-  EXPECT_THAT(Eval("enum_two_ref | 0x01"), IsEqual("3"));
-  EXPECT_THAT(Eval("enum_two_ref ^ 0b11"), IsEqual("1"));
-  EXPECT_THAT(Eval("enum_two_ref >> 1"), IsEqual("1"));
-  EXPECT_THAT(Eval("enum_two_ref << 1"), IsEqual("4"));
+  EXPECT_THAT(Eval("enum_one_ref + 1"), IsEqual("2", compare_types));
+  EXPECT_THAT(Eval("enum_one_ref * 2"), IsEqual("2", compare_types));
+  EXPECT_THAT(Eval("enum_two_ref / 2"), IsEqual("1", compare_types));
+  EXPECT_THAT(Eval("enum_one_ref % 2"), IsEqual("1", compare_types));
+  EXPECT_THAT(Eval("enum_two_ref & 2"), IsEqual("2", compare_types));
+  EXPECT_THAT(Eval("enum_two_ref | 0x01"), IsEqual("3", compare_types));
+  EXPECT_THAT(Eval("enum_two_ref ^ 0b11"), IsEqual("1", compare_types));
+  EXPECT_THAT(Eval("enum_two_ref >> 1"), IsEqual("1", compare_types));
+  EXPECT_THAT(Eval("enum_two_ref << 1"), IsEqual("4", compare_types));
   EXPECT_THAT(Eval("8 >> enum_two_ref"), IsEqual("2"));
   EXPECT_THAT(Eval("1 << enum_two_ref"), IsEqual("4"));
-  EXPECT_THAT(Eval("+enum_one_ref"), IsEqual("1"));
+  EXPECT_THAT(Eval("+enum_one_ref"), IsEqual("1", compare_types));
   EXPECT_THAT(Eval("!enum_one_ref"), IsEqual("false"));
   EXPECT_THAT(Eval("(int*)1 + enum_one_ref"), IsEqual("0x0000000000000005"));
   EXPECT_THAT(Eval("(int*)5 - enum_one_ref"), IsEqual("0x0000000000000001"));
@@ -2012,9 +2059,10 @@ TEST_F(EvalTest, TestUnscopedEnumNegation) {
   // implementation defined, but it should convert to "int" nonetheless.
   this->compare_with_lldb_ = false;
 
-  EXPECT_THAT(Eval("-enum_one"), IsEqual("-1"));
-  EXPECT_THAT(Eval("-enum_one_ref"), IsEqual("-1"));
-  EXPECT_THAT(Eval("-(UnscopedEnumEmpty)1"), IsOk());
+  bool compare_types = HAS_METHOD(lldb::SBType, GetEnumerationIntegerType());
+  EXPECT_THAT(Eval("-enum_one"), IsEqual("-1", compare_types));
+  EXPECT_THAT(Eval("-enum_one_ref"), IsEqual("-1", compare_types));
+  EXPECT_THAT(Eval("-(UnscopedEnumEmpty)1"), IsOk(compare_types));
 }
 
 TEST_F(EvalTest, TestUnscopedEnumWithUnderlyingType) {
@@ -2039,10 +2087,11 @@ TEST_F(EvalTest, TestTernaryOperator) {
   EXPECT_THAT(Eval("true ? c : 1"), IsEqual("2"));
   EXPECT_THAT(Eval("false ? 1 : c"), IsEqual("2"));
 
+  bool compare_types = HAS_METHOD(lldb::SBType, GetEnumerationIntegerType());
   EXPECT_THAT(Eval("false ? a_enum : EnumA::kOneA"), IsEqual("kOneA"));
-  EXPECT_THAT(Eval("false ? b_enum : a_enum"), IsEqual("2"));
-  EXPECT_THAT(Eval("false ? c : b_enum"), IsEqual("1"));
-  EXPECT_THAT(Eval("false ? b_enum : c"), IsEqual("2"));
+  EXPECT_THAT(Eval("false ? b_enum : a_enum"), IsEqual("2", compare_types));
+  EXPECT_THAT(Eval("false ? c : b_enum"), IsEqual("1", compare_types));
+  EXPECT_THAT(Eval("false ? b_enum : c"), IsEqual("2", compare_types));
 
   EXPECT_THAT(Eval("true ? (int*)15 : 0"), IsEqual("0x000000000000000f"));
   EXPECT_THAT(Eval("true ? 0 : (int*)15"), IsEqual("0x0000000000000000"));
