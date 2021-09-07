@@ -117,6 +117,10 @@ build --config=linux
 build --@llvm_project//:llvm_build=static
 ```
 
+## Publications
+
+* [Blazing fast expression evaluation for C++ in LLDB](https://werat.dev/blog/blazing-fast-expression-evaluation-for-c-in-lldb/)
+
 ## Disclaimer
 
 This is not an officially supported Google product.
