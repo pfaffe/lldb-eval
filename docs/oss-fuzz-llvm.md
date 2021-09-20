@@ -1,6 +1,6 @@
 # How to build LLVM for OSS-Fuzz
 
-> Disclaimer: these commands are ocumented here so I don't forget them. Not intented to be used by anyone.
+> Disclaimer: these commands are documented here so I don't forget them. Not intented to be used by anyone.
 
 Build dependencies in the Dockerfile:
 
