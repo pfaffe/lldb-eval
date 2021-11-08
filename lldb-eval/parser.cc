@@ -62,14 +62,6 @@ const char* kInvalidOperandsToBinaryExpression =
 const char* kValueIsNotConvertibleToBool =
     "value of type {0} is not contextually convertible to 'bool'";
 
-void StringReplace(std::string& str, const std::string& old_value,
-                   const std::string& new_value) {
-  size_t pos = str.find(old_value);
-  if (pos != std::string::npos) {
-    str.replace(pos, old_value.length(), new_value);
-  }
-}
-
 template <typename T>
 constexpr unsigned type_width() {
   return static_cast<unsigned>(sizeof(T)) * CHAR_BIT;
@@ -554,35 +546,116 @@ static std::tuple<lldb::SBTypeMember, std::vector<uint32_t>> GetFieldWithName(
   return {member, std::move(idx)};
 }
 
-std::string TypeDeclaration::GetName() const {
-  // Full name is a combination of a base name and pointer operators.
-  std::string name = GetBaseName();
-
-  // In LLDB pointer operators are separated with a single whitespace.
-  if (ptr_operators_.size() > 0) {
-    name.append(" ");
+static const char* ToString(TypeDeclaration::TypeSpecifier type_spec) {
+  using TypeSpecifier = TypeDeclaration::TypeSpecifier;
+  switch (type_spec) {
+      // clang-format off
+    case TypeSpecifier::kVoid:       return "void";
+    case TypeSpecifier::kBool:       return "bool";
+    case TypeSpecifier::kChar:       return "char";
+    case TypeSpecifier::kShort:      return "short";
+    case TypeSpecifier::kInt:        return "int";
+    case TypeSpecifier::kLong:       return "long";
+    case TypeSpecifier::kLongLong:   return "long long";
+    case TypeSpecifier::kFloat:      return "float";
+    case TypeSpecifier::kDouble:     return "double";
+    case TypeSpecifier::kLongDouble: return "long double";
+    case TypeSpecifier::kWChar:      return "wchar_t";
+    case TypeSpecifier::kChar16:     return "char16_t";
+    case TypeSpecifier::kChar32:     return "char32_t";
+      // clang-format on
+    default:
+      assert(false && "invalid type specifier");
+      return nullptr;
   }
-  for (auto& [tok, _] : ptr_operators_) {
-    if (tok == clang::tok::star) {
-      name.append("*");
-    } else if (tok == clang::tok::amp) {
-      name.append("&");
-    }
-  }
-  return name;
 }
 
-std::string TypeDeclaration::GetBaseName() const {
-  // TODO(werat): Implement more robust textual type representation.
-  std::string base_name = llvm::formatv(
-      "{0:$[ ]}", llvm::make_range(typenames_.begin(), typenames_.end()));
+static const char* ToString(TypeDeclaration::SignSpecifier sign_spec) {
+  using SignSpecifier = TypeDeclaration::SignSpecifier;
+  switch (sign_spec) {
+      // clang-format off
+    case SignSpecifier::kSigned:   return "signed";
+    case SignSpecifier::kUnsigned: return "unsigned";
+      // clang-format on
+    default:
+      assert(false && "invalid sign specifier");
+      return nullptr;
+  }
+}
 
-  // TODO(werat): Handle these type aliases and detect invalid type combinations
-  // (e.g. "long char") during the TypeDeclaration construction.
-  StringReplace(base_name, "short int", "short");
-  StringReplace(base_name, "long int", "long");
+static TypeDeclaration::TypeSpecifier ToTypeSpecifier(
+    clang::tok::TokenKind kind) {
+  using TypeSpecifier = TypeDeclaration::TypeSpecifier;
+  switch (kind) {
+      // clang-format off
+    case clang::tok::kw_void:     return TypeSpecifier::kVoid;
+    case clang::tok::kw_bool:     return TypeSpecifier::kBool;
+    case clang::tok::kw_char:     return TypeSpecifier::kChar;
+    case clang::tok::kw_short:    return TypeSpecifier::kShort;
+    case clang::tok::kw_int:      return TypeSpecifier::kInt;
+    case clang::tok::kw_long:     return TypeSpecifier::kLong;
+    case clang::tok::kw_float:    return TypeSpecifier::kFloat;
+    case clang::tok::kw_double:   return TypeSpecifier::kDouble;
+    case clang::tok::kw_wchar_t:  return TypeSpecifier::kWChar;
+    case clang::tok::kw_char16_t: return TypeSpecifier::kChar16;
+    case clang::tok::kw_char32_t: return TypeSpecifier::kChar32;
+      // clang-format on
+    default:
+      assert(false && "invalid type specifier token");
+      return TypeSpecifier::kUnknown;
+  }
+}
 
-  return base_name;
+lldb::BasicType TypeDeclaration::GetBasicType() const {
+  assert(is_builtin_ && "type declaration doesn't describe a builtin type");
+
+  if (sign_specifier_ == SignSpecifier::kSigned &&
+      type_specifier_ == TypeSpecifier::kChar) {
+    // "signed char" isn't the same as "char".
+    return lldb::eBasicTypeSignedChar;
+  }
+
+  if (sign_specifier_ == SignSpecifier::kUnsigned) {
+    switch (type_specifier_) {
+      // clang-format off
+      // "unsigned" is "unsigned int"
+      case TypeSpecifier::kUnknown:  return lldb::eBasicTypeUnsignedInt;
+      case TypeSpecifier::kChar:     return lldb::eBasicTypeUnsignedChar;
+      case TypeSpecifier::kShort:    return lldb::eBasicTypeUnsignedShort;
+      case TypeSpecifier::kInt:      return lldb::eBasicTypeUnsignedInt;
+      case TypeSpecifier::kLong:     return lldb::eBasicTypeUnsignedLong;
+      case TypeSpecifier::kLongLong: return lldb::eBasicTypeUnsignedLongLong;
+      // clang-format on
+      default:
+        assert(false && "unknown unsigned basic type");
+        return lldb::eBasicTypeInvalid;
+    }
+  }
+
+  switch (type_specifier_) {
+      // clang-format off
+    case TypeSpecifier::kUnknown:
+      // "signed" is "signed int"
+      assert(sign_specifier_ == SignSpecifier::kSigned &&
+             "invalid basic type declaration");
+      return lldb::eBasicTypeInt;
+    case TypeSpecifier::kVoid:       return lldb::eBasicTypeVoid;
+    case TypeSpecifier::kBool:       return lldb::eBasicTypeBool;
+    case TypeSpecifier::kChar:       return lldb::eBasicTypeChar;
+    case TypeSpecifier::kShort:      return lldb::eBasicTypeShort;
+    case TypeSpecifier::kInt:        return lldb::eBasicTypeInt;
+    case TypeSpecifier::kLong:       return lldb::eBasicTypeLong;
+    case TypeSpecifier::kLongLong:   return lldb::eBasicTypeLongLong;
+    case TypeSpecifier::kFloat:      return lldb::eBasicTypeFloat;
+    case TypeSpecifier::kDouble:     return lldb::eBasicTypeDouble;
+    case TypeSpecifier::kLongDouble: return lldb::eBasicTypeLongDouble;
+    case TypeSpecifier::kWChar:      return lldb::eBasicTypeWChar;
+    case TypeSpecifier::kChar16:     return lldb::eBasicTypeChar16;
+    case TypeSpecifier::kChar32:     return lldb::eBasicTypeChar32;
+      // clang-format on
+  }
+
+  return lldb::eBasicTypeInvalid;
 }
 
 static std::unique_ptr<BuiltinFunctionDef> GetBuiltinFunctionDef(
@@ -1086,21 +1159,13 @@ ExprResult Parser::ParseCastExpression() {
 
     // Try parsing the type declaration. If the returned value is not valid,
     // then we should rollback and try parsing the expression.
-    TypeDeclaration type_decl = ParseTypeId();
-
-    // Try resolving base type of the type declaration.
-    // TODO(werat): Resolve the type and the declarators during parsing to save
-    // time and produce more accurate diagnostics.
-    lldb::SBType type = ResolveTypeFromTypeDecl(type_decl);
-
-    if (type) {
+    auto type_id = ParseTypeId();
+    if (type_id) {
       // Successfully parsed the type declaration. Commit the backtracked
       // tokens and parse the cast_expression.
       tentative_parsing.Commit();
 
-      // Apply type declarators (i.e. pointer/reference qualifiers).
-      type = ResolveTypeDeclarators(type, type_decl);
-      if (!type) {
+      if (!type_id.value()) {
         return std::make_unique<ErrorNode>();
       }
 
@@ -1108,13 +1173,13 @@ ExprResult Parser::ParseCastExpression() {
       ConsumeToken();
       auto rhs = ParseCastExpression();
 
-      return BuildCStyleCast(type, std::move(rhs), token.getLocation());
-
-    } else {
-      // Failed to parse the contents of the parentheses as a type declaration.
-      // Rollback the lexer and try parsing it as unary_expression.
-      tentative_parsing.Rollback();
+      return BuildCStyleCast(type_id.value(), std::move(rhs),
+                             token.getLocation());
     }
+
+    // Failed to parse the contents of the parentheses as a type declaration.
+    // Rollback the lexer and try parsing it as unary_expression.
+    tentative_parsing.Rollback();
   }
 
   return ParseUnaryExpression();
@@ -1192,17 +1257,15 @@ ExprResult Parser::ParseUnaryExpression() {
       ConsumeToken();
 
       // Parse the type definition and resolve the type.
-      TypeDeclaration type_decl = ParseTypeId();
-      lldb::SBType type = ResolveTypeFromTypeDecl(type_decl);
-      if (type) {
+      auto type_id = ParseTypeId();
+      if (type_id) {
         tentative_parsing.Commit();
 
         // type_id requires parentheses, so there must be a closing one.
         Expect(clang::tok::r_paren);
         ConsumeToken();
-        // Resolve type declarators. This can fail, in this case the operand
-        // will be empty and the corresponding diagnostics will be reported.
-        operand = ResolveTypeDeclarators(type, type_decl);
+
+        operand = type_id.value();
 
       } else {
         tentative_parsing.Rollback();
@@ -1254,19 +1317,16 @@ ExprResult Parser::ParsePostfixExpression() {
     Expect(clang::tok::less);
     ConsumeToken();
 
-    // Parse the type definition and resolve the type.
-    clang::SourceLocation type_loc = token_.getLocation();
-    TypeDeclaration type_decl = ParseTypeId();
+    clang::SourceLocation loc = token_.getLocation();
 
-    lldb::SBType type = ResolveTypeFromTypeDecl(type_decl);
-    if (!type) {
-      BailOut(ErrorCode::kUndeclaredIdentifier,
-              llvm::formatv("unknown type name '{0}'", type_decl.GetBaseName()),
-              type_loc);
+    // Parse the type definition and resolve the type.
+    auto type_id = ParseTypeId(/*must_be_type_id*/ true);
+    if (!type_id) {
+      BailOut(ErrorCode::kInvalidOperandType,
+              "type name requires a specifier or qualifier", loc);
       return std::make_unique<ErrorNode>();
     }
-    type = ResolveTypeDeclarators(type, type_decl);
-    if (!type) {
+    if (!type_id.value()) {
       return std::make_unique<ErrorNode>();
     }
 
@@ -1279,7 +1339,7 @@ ExprResult Parser::ParsePostfixExpression() {
     Expect(clang::tok::r_paren);
     ConsumeToken();
 
-    lhs = BuildCxxCast(cast_kind, type, std::move(rhs), cast_loc);
+    lhs = BuildCxxCast(cast_kind, type_id.value(), std::move(rhs), cast_loc);
 
   } else {
     // Otherwise it's a primary_expression.
@@ -1419,21 +1479,52 @@ ExprResult Parser::ParsePrimaryExpression() {
 //  type_id:
 //    type_specifier_seq [abstract_declarator]
 //
-TypeDeclaration Parser::ParseTypeId() {
+std::optional<lldb::SBType> Parser::ParseTypeId(bool must_be_type_id) {
+  clang::SourceLocation type_loc = token_.getLocation();
   TypeDeclaration type_decl;
 
   // type_specifier_seq is required here, start with trying to parse it.
   ParseTypeSpecifierSeq(&type_decl);
 
+  if (type_decl.IsEmpty()) {
+    return {};
+  }
+  if (type_decl.has_error_) {
+    return lldb::SBType();
+  }
+
+  // Try to resolve the base type.
+  lldb::SBType type;
+  if (type_decl.is_builtin_) {
+    type = ctx_->GetBasicType(type_decl.GetBasicType());
+    assert(type.IsValid() && "cannot resolve basic type");
+
+  } else {
+    assert(type_decl.is_user_type_ && "type_decl must be a user type");
+    type = ctx_->ResolveTypeByName(type_decl.user_typename_);
+    if (!type) {
+      if (must_be_type_id) {
+        BailOut(
+            ErrorCode::kUndeclaredIdentifier,
+            llvm::formatv("unknown type name '{0}'", type_decl.user_typename_),
+            type_loc);
+        return lldb::SBType();
+      }
+      return {};
+    }
+  }
+
   //
   //  abstract_declarator:
   //    ptr_operator [abstract_declarator]
   //
+  std::vector<Parser::PtrOperator> ptr_operators;
   while (IsPtrOperator(token_)) {
-    ParsePtrOperator(&type_decl);
+    ptr_operators.push_back(ParsePtrOperator());
   }
+  type = ResolveTypeDeclarators(type, ptr_operators);
 
-  return type_decl;
+  return type;
 }
 
 // Parse a type_specifier_seq.
@@ -1443,8 +1534,6 @@ TypeDeclaration Parser::ParseTypeId() {
 //
 void Parser::ParseTypeSpecifierSeq(TypeDeclaration* type_decl) {
   while (true) {
-    // TODO(b/161677840): Check if produced type specifiers can be combined
-    // together. For example, "long long" is legal, but "char char" is not.
     bool type_specifier = ParseTypeSpecifier(type_decl);
     if (!type_specifier) {
       break;
@@ -1484,7 +1573,23 @@ bool Parser::ParseTypeSpecifier(TypeDeclaration* type_decl) {
   }
 
   if (IsSimpleTypeSpecifierKeyword(token_)) {
-    type_decl->typenames_.push_back(pp_->getSpelling(token_));
+    // User-defined typenames can't be combined with builtin keywords.
+    if (type_decl->is_user_type_) {
+      BailOut(ErrorCode::kInvalidOperandType,
+              "cannot combine with previous declaration specifier",
+              token_.getLocation());
+      type_decl->has_error_ = true;
+      return false;
+    }
+
+    // From now on this type declaration must describe a builtin type.
+    // TODO: Should this be allowed -- `unsigned myint`?
+    type_decl->is_builtin_ = true;
+
+    if (!HandleSimpleTypeSpecifier(type_decl)) {
+      type_decl->has_error_ = true;
+      return false;
+    }
     ConsumeToken();
     return true;
   }
@@ -1499,6 +1604,8 @@ bool Parser::ParseTypeSpecifier(TypeDeclaration* type_decl) {
       ConsumeToken();
     }
 
+    clang::SourceLocation loc = token_.getLocation();
+
     // Try parsing optional nested_name_specifier.
     auto nested_name_specifier = ParseNestedNameSpecifier();
 
@@ -1509,11 +1616,26 @@ bool Parser::ParseTypeSpecifier(TypeDeclaration* type_decl) {
     // Global and qualified (namespace/class) scopes can be empty, since they're
     // optional. In this case type_name is type we're looking for.
     if (!type_name.empty()) {
-      // Construct the fully qualified typename.
-      auto type_specifier = llvm::formatv("{0}{1}{2}", global_scope ? "::" : "",
-                                          nested_name_specifier, type_name);
+      // User-defined typenames can't be combined with builtin keywords.
+      if (type_decl->is_builtin_) {
+        BailOut(ErrorCode::kInvalidOperandType,
+                "cannot combine with previous declaration specifier", loc);
+        type_decl->has_error_ = true;
+        return false;
+      }
+      // There should be only one user-defined typename.
+      if (type_decl->is_user_type_) {
+        BailOut(ErrorCode::kInvalidOperandType,
+                "two or more data types in declaration of 'type name'", loc);
+        type_decl->has_error_ = true;
+        return false;
+      }
 
-      type_decl->typenames_.push_back(type_specifier);
+      // Construct the fully qualified typename.
+      type_decl->is_user_type_ = true;
+      type_decl->user_typename_ =
+          llvm::formatv("{0}{1}{2}", global_scope ? "::" : "",
+                        nested_name_specifier, type_name);
       return true;
     }
   }
@@ -1707,19 +1829,17 @@ std::string Parser::ParseTemplateArgument() {
     // Therefore, first try parsing type_id.
     TentativeParsingAction tentative_parsing(this);
 
-    TypeDeclaration type_decl = ParseTypeId();
+    auto type_id = ParseTypeId();
+    if (type_id) {
+      tentative_parsing.Commit();
 
-    if (type_decl.IsValid() && ResolveTypeFromTypeDecl(type_decl)) {
-      // Successfully parsed a type_id, check if the next token can finish the
-      // template_argument. If so, commit the parsed tokens and return parsed
-      // template_argument.
-      if (TokenEndsTemplateArgumentList(token_)) {
-        tentative_parsing.Commit();
-        return type_decl.GetName();
-      }
+      lldb::SBType& type = type_id.value();
+      return type ? type.GetName() : "";
+
+    } else {
+      // Failed to parse a type_id. Rollback the parser and try something else.
+      tentative_parsing.Rollback();
     }
-    // Failed to parse a type_id. Rollback the parser and try something else.
-    tentative_parsing.Rollback();
   }
 
   {
@@ -1776,12 +1896,12 @@ std::string Parser::ParseTemplateArgument() {
 //    "*" [cv_qualifier_seq]
 //    "&"
 //
-void Parser::ParsePtrOperator(TypeDeclaration* type_decl) {
+Parser::PtrOperator Parser::ParsePtrOperator() {
   ExpectOneOf(clang::tok::star, clang::tok::amp);
 
+  PtrOperator ptr_operator;
   if (token_.is(clang::tok::star)) {
-    type_decl->ptr_operators_.emplace_back(clang::tok::star,
-                                           token_.getLocation());
+    ptr_operator = std::make_tuple(clang::tok::star, token_.getLocation());
     ConsumeToken();
 
     //
@@ -1798,25 +1918,17 @@ void Parser::ParsePtrOperator(TypeDeclaration* type_decl) {
     }
 
   } else if (token_.is(clang::tok::amp)) {
-    type_decl->ptr_operators_.emplace_back(clang::tok::amp,
-                                           token_.getLocation());
+    ptr_operator = std::make_tuple(clang::tok::amp, token_.getLocation());
     ConsumeToken();
   }
+
+  return ptr_operator;
 }
 
-lldb::SBType Parser::ResolveTypeFromTypeDecl(const TypeDeclaration& type_decl) {
-  if (!type_decl.IsValid()) {
-    return lldb::SBType();
-  }
-
-  // Resolve the type in the current expression context.
-  return ctx_->ResolveTypeByName(type_decl.GetBaseName());
-}
-
-lldb::SBType Parser::ResolveTypeDeclarators(lldb::SBType type,
-                                            const TypeDeclaration& type_decl) {
+lldb::SBType Parser::ResolveTypeDeclarators(
+    lldb::SBType type, const std::vector<Parser::PtrOperator>& ptr_operators) {
   // Resolve pointers/references.
-  for (auto& [tk, loc] : type_decl.ptr_operators_) {
+  for (auto& [tk, loc] : ptr_operators) {
     if (tk == clang::tok::star) {
       // Pointers to reference types are forbidden.
       if (type.IsReferenceType()) {
@@ -1860,6 +1972,182 @@ bool Parser::IsCvQualifier(clang::Token token) const {
 
 bool Parser::IsPtrOperator(clang::Token token) const {
   return token.isOneOf(clang::tok::star, clang::tok::amp);
+}
+
+bool Parser::HandleSimpleTypeSpecifier(TypeDeclaration* type_decl) {
+  using TypeSpecifier = TypeDeclaration::TypeSpecifier;
+  using SignSpecifier = TypeDeclaration::SignSpecifier;
+
+  TypeSpecifier type_spec = type_decl->type_specifier_;
+  clang::SourceLocation loc = token_.getLocation();
+  clang::tok::TokenKind kind = token_.getKind();
+
+  switch (kind) {
+    case clang::tok::kw_int: {
+      // "int" can have signedness and be combined with "short", "long" and
+      // "long long" (but not with another "int").
+      if (type_decl->has_int_specifier_) {
+        BailOut(ErrorCode::kInvalidOperandType,
+                "cannot combine with previous 'int' declaration specifier",
+                loc);
+        return false;
+      }
+      if (type_spec == TypeSpecifier::kShort ||
+          type_spec == TypeSpecifier::kLong ||
+          type_spec == TypeSpecifier::kLongLong) {
+        type_decl->has_int_specifier_ = true;
+        return true;
+      } else if (type_spec == TypeSpecifier::kUnknown) {
+        type_decl->type_specifier_ = TypeSpecifier::kInt;
+        type_decl->has_int_specifier_ = true;
+        return true;
+      }
+      BailOut(ErrorCode::kInvalidOperandType,
+              llvm::formatv(
+                  "cannot combine with previous '{0}' declaration specifier",
+                  ToString(type_spec)),
+              loc);
+      return false;
+    }
+
+    case clang::tok::kw_long: {
+      // "long" can have signedness and be combined with "int" or "long" to
+      // form "long long".
+      if (type_spec == TypeSpecifier::kUnknown ||
+          type_spec == TypeSpecifier::kInt) {
+        type_decl->type_specifier_ = TypeSpecifier::kLong;
+        return true;
+      } else if (type_spec == TypeSpecifier::kLong) {
+        type_decl->type_specifier_ = TypeSpecifier::kLongLong;
+        return true;
+      } else if (type_spec == TypeSpecifier::kDouble) {
+        type_decl->type_specifier_ = TypeSpecifier::kLongDouble;
+        return true;
+      }
+      BailOut(ErrorCode::kInvalidOperandType,
+              llvm::formatv(
+                  "cannot combine with previous '{0}' declaration specifier",
+                  ToString(type_spec)),
+              loc);
+      return false;
+    }
+
+    case clang::tok::kw_short: {
+      // "short" can have signedness and be combined with "int".
+      if (type_spec == TypeSpecifier::kUnknown ||
+          type_spec == TypeSpecifier::kInt) {
+        type_decl->type_specifier_ = TypeSpecifier::kShort;
+        return true;
+      }
+      BailOut(ErrorCode::kInvalidOperandType,
+              llvm::formatv(
+                  "cannot combine with previous '{0}' declaration specifier",
+                  ToString(type_spec)),
+              loc);
+      return false;
+    }
+
+    case clang::tok::kw_char: {
+      // "char" can have signedness, but it cannot be combined with any other
+      // type specifier.
+      if (type_spec == TypeSpecifier::kUnknown) {
+        type_decl->type_specifier_ = TypeSpecifier::kChar;
+        return true;
+      }
+      BailOut(ErrorCode::kInvalidOperandType,
+              llvm::formatv(
+                  "cannot combine with previous '{0}' declaration specifier",
+                  ToString(type_spec)),
+              loc);
+      return false;
+    }
+
+    case clang::tok::kw_double: {
+      // "double" can be combined with "long" to form "long double", but it
+      // cannot be combined with signedness specifier.
+      if (type_decl->sign_specifier_ != SignSpecifier::kUnknown) {
+        BailOut(ErrorCode::kInvalidOperandType,
+                "'double' cannot be signed or unsigned", loc);
+        return false;
+      }
+      if (type_spec == TypeSpecifier::kUnknown) {
+        type_decl->type_specifier_ = TypeSpecifier::kDouble;
+        return true;
+      } else if (type_spec == TypeSpecifier::kLong) {
+        type_decl->type_specifier_ = TypeSpecifier::kLongDouble;
+        return true;
+      }
+      BailOut(ErrorCode::kInvalidOperandType,
+              llvm::formatv(
+                  "cannot combine with previous '{0}' declaration specifier",
+                  ToString(type_spec)),
+              loc);
+      return false;
+    }
+
+    case clang::tok::kw_bool:
+    case clang::tok::kw_void:
+    case clang::tok::kw_float:
+    case clang::tok::kw_wchar_t:
+    case clang::tok::kw_char16_t:
+    case clang::tok::kw_char32_t: {
+      // These types cannot have signedness or be combined with any other type
+      // specifiers.
+      if (type_decl->sign_specifier_ != SignSpecifier::kUnknown) {
+        BailOut(ErrorCode::kInvalidOperandType,
+                llvm::formatv("'{0}' cannot be signed or unsigned",
+                              ToString(ToTypeSpecifier(kind))),
+                loc);
+        return false;
+      }
+      if (type_spec != TypeSpecifier::kUnknown) {
+        BailOut(ErrorCode::kInvalidOperandType,
+                llvm::formatv(
+                    "cannot combine with previous '{0}' declaration specifier",
+                    ToString(type_spec)),
+                loc);
+      }
+      type_decl->type_specifier_ = ToTypeSpecifier(kind);
+      return true;
+    }
+
+    case clang::tok::kw_signed:
+    case clang::tok::kw_unsigned: {
+      // "signed" and "unsigned" cannot be combined with another signedness
+      // specifier.
+      if (type_decl->sign_specifier_ != SignSpecifier::kUnknown) {
+        BailOut(ErrorCode::kInvalidOperandType,
+                llvm::formatv(
+                    "cannot combine with previous '{0}' declaration specifier",
+                    ToString(type_decl->sign_specifier_)),
+                loc);
+        return false;
+      }
+      if (type_spec == TypeSpecifier::kVoid ||
+          type_spec == TypeSpecifier::kBool ||
+          type_spec == TypeSpecifier::kFloat ||
+          type_spec == TypeSpecifier::kDouble ||
+          type_spec == TypeSpecifier::kLongDouble ||
+          type_spec == TypeSpecifier::kWChar ||
+          type_spec == TypeSpecifier::kChar16 ||
+          type_spec == TypeSpecifier::kChar32) {
+        BailOut(ErrorCode::kInvalidOperandType,
+                llvm::formatv("'{0}' cannot be signed or unsigned",
+                              ToString(type_spec)),
+                loc);
+        return false;
+      }
+
+      type_decl->sign_specifier_ = (kind == clang::tok::kw_signed)
+                                       ? SignSpecifier::kSigned
+                                       : SignSpecifier::kUnsigned;
+      return true;
+    }
+
+    default:
+      assert(false && "invalid simple type specifier kind");
+      return false;
+  }
 }
 
 // Parse an id_expression.

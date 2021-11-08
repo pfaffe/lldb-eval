@@ -1459,6 +1459,12 @@ TEST_F(EvalTest, TestCxxStaticCast) {
   EXPECT_THAT(Eval("static_cast<int&>(5)"),
               IsError("static_cast from rvalue of type 'int' to reference type "
                       "'int &' is not implemented yet"));
+
+  // Invalid expressions.
+  EXPECT_THAT(Eval("static_cast<1>(1)"),
+              IsError("type name requires a specifier or qualifier"));
+  EXPECT_THAT(Eval("static_cast<parent>(1)"),
+              IsError("unknown type name 'parent'"));
 }
 
 TEST_F(EvalTest, TestCastDerivedToBase) {
@@ -1726,6 +1732,136 @@ TEST_F(EvalTest, TestStaticConstDeclaredOutsideTheClass) {
               IsError("use of undeclared identifier '::static_const'"));
   EXPECT_THAT(Scope("vars").Eval("::Nested::static_const"),
               IsError("use of undeclared identifier '::Nested::static_const'"));
+}
+
+TEST_F(EvalTest, TestBasicTypeDeclaration) {
+  EXPECT_THAT(Eval("(char)65"), IsEqual("'A'"));
+  EXPECT_THAT(Eval("(char unsigned)65"), IsEqual("'A'"));
+  EXPECT_THAT(Eval("(signed char)65"), IsEqual("'A'"));
+#ifdef _WIN32
+  // Size of "wchar_t" is 2 bytes on Windows.
+  EXPECT_THAT(Eval("(wchar_t)0x4141"), IsEqual("AA"));
+#else
+  // Size of "wchar_t" is 4 bytes on Linux.
+  EXPECT_THAT(Eval("(wchar_t)0x41414141"), IsEqual("AAAA"));
+#endif
+  EXPECT_THAT(Eval("(char16_t)0x4141"), IsEqual("U+4141"));
+  EXPECT_THAT(Eval("(char32_t)0x4141"), IsEqual("U+0x00004141"));
+  EXPECT_THAT(Eval("(int short)-1"), IsEqual("-1"));
+  EXPECT_THAT(Eval("(short int)-1"), IsEqual("-1"));
+  EXPECT_THAT(Eval("(short)-1"), IsEqual("-1"));
+  EXPECT_THAT(Eval("(unsigned short)-1"), IsEqual("65535"));
+  EXPECT_THAT(Eval("(short unsigned)-1"), IsEqual("65535"));
+  EXPECT_THAT(Eval("(int short unsigned)-1"), IsEqual("65535"));
+  EXPECT_THAT(Eval("(int)-1"), IsEqual("-1"));
+  EXPECT_THAT(Eval("(signed int)-1"), IsEqual("-1"));
+  EXPECT_THAT(Eval("(signed)-1"), IsEqual("-1"));
+  EXPECT_THAT(Eval("(unsigned)-1"), IsEqual("4294967295"));
+  EXPECT_THAT(Eval("(int unsigned)-1"), IsEqual("4294967295"));
+  EXPECT_THAT(Eval("(long)-1"), IsEqual("-1"));
+  EXPECT_THAT(Eval("(signed long)-1"), IsEqual("-1"));
+  EXPECT_THAT(Eval("(long int signed)-1"), IsEqual("-1"));
+#ifdef _WIN32
+  // Size of "long" is 4 bytes on Windows.
+  EXPECT_THAT(Eval("(unsigned long)-1"), IsEqual("4294967295"));
+  EXPECT_THAT(Eval("(int long unsigned)-1"), IsEqual("4294967295"));
+#else
+  // Size of "long" is 8 bytes on Linux.
+  EXPECT_THAT(Eval("(unsigned long)-1"), IsEqual("18446744073709551615"));
+  EXPECT_THAT(Eval("(int long unsigned)-1"), IsEqual("18446744073709551615"));
+#endif
+  EXPECT_THAT(Eval("(long long)-1"), IsEqual("-1"));
+  EXPECT_THAT(Eval("(long long int)-1"), IsEqual("-1"));
+  EXPECT_THAT(Eval("(int signed long long)-1"), IsEqual("-1"));
+  EXPECT_THAT(Eval("(long int long unsigned)-1"),
+              IsEqual("18446744073709551615"));
+  EXPECT_THAT(Eval("(int long unsigned long)-1"),
+              IsEqual("18446744073709551615"));
+  EXPECT_THAT(Eval("(unsigned long long)-1"), IsEqual("18446744073709551615"));
+
+  EXPECT_THAT(Eval("(float)1.5"), IsEqual("1.5"));
+  EXPECT_THAT(Eval("(double)1.5"), IsEqual("1.5"));
+#ifdef _WIN32
+  // Casting to "long double" results in "NaN" on Linux.
+  EXPECT_THAT(Eval("(long double)1.5"), IsEqual("1.5"));
+  EXPECT_THAT(Eval("(double long)1.5"), IsEqual("1.5"));
+#endif
+  EXPECT_THAT(Eval("(bool)1.5"), IsEqual("true"));
+
+  EXPECT_THAT(Eval("(void*)0"), IsEqual("0x0000000000000000"));
+  EXPECT_THAT(Eval("(unsigned**)0"), IsEqual("0x0000000000000000"));
+
+  EXPECT_THAT(
+      Eval("(int int)0"),
+      IsError("cannot combine with previous 'int' declaration specifier\n"
+              "(int int)0\n"
+              "     ^"));
+  EXPECT_THAT(
+      Eval("(char int)0"),
+      IsError("cannot combine with previous 'char' declaration specifier"));
+  EXPECT_THAT(
+      Eval("(int char)0"),
+      IsError("cannot combine with previous 'int' declaration specifier"));
+  EXPECT_THAT(
+      Eval("(long long long)0"),
+      IsError(
+          "cannot combine with previous 'long long' declaration specifier"));
+  EXPECT_THAT(
+      Eval("(long long double)0"),
+      IsError(
+          "cannot combine with previous 'long long' declaration specifier"));
+  EXPECT_THAT(
+      Eval("(long double long)0"),
+      IsError(
+          "cannot combine with previous 'long double' declaration specifier"));
+  EXPECT_THAT(Eval("(unsigned long double)0"),
+              IsError("'double' cannot be signed or unsigned"));
+  EXPECT_THAT(Eval("(long double signed)0"),
+              IsError("'long double' cannot be signed or unsigned"));
+  EXPECT_THAT(
+      Eval("(short float)0"),
+      IsError("cannot combine with previous 'short' declaration specifier"));
+  EXPECT_THAT(
+      Eval("(unsigned signed)0"),
+      IsError("cannot combine with previous 'unsigned' declaration specifier"));
+  EXPECT_THAT(
+      Eval("(unsigned unsigned)0"),
+      IsError("cannot combine with previous 'unsigned' declaration specifier"));
+  EXPECT_THAT(Eval("(signed wchar_t)0"),
+              IsError("'wchar_t' cannot be signed or unsigned"));
+  EXPECT_THAT(Eval("(signed char16_t)0"),
+              IsError("'char16_t' cannot be signed or unsigned"));
+  EXPECT_THAT(Eval("(signed char32_t)0"),
+              IsError("'char32_t' cannot be signed or unsigned"));
+  EXPECT_THAT(Eval("(unsigned float)0"),
+              IsError("'float' cannot be signed or unsigned"));
+  EXPECT_THAT(Eval("(unsigned double)0"),
+              IsError("'double' cannot be signed or unsigned"));
+  EXPECT_THAT(Eval("(unsigned bool)0"),
+              IsError("'bool' cannot be signed or unsigned"));
+  EXPECT_THAT(Eval("(unsigned void)0"),
+              IsError("'void' cannot be signed or unsigned"));
+  EXPECT_THAT(Eval("(bool unsigned)0"),
+              IsError("'bool' cannot be signed or unsigned"));
+  EXPECT_THAT(Eval("(bool signed)0"),
+              IsError("'bool' cannot be signed or unsigned"));
+
+  // Error reporting works with other kinds of expression.
+  EXPECT_THAT(
+      Eval("static_cast<int int>(0)"),
+      IsError("cannot combine with previous 'int' declaration specifier"));
+  EXPECT_THAT(
+      Eval("sizeof(int int)"),
+      IsError("cannot combine with previous 'int' declaration specifier"));
+}
+
+TEST_F(EvalTest, TestUserTypeDeclaration) {
+  EXPECT_THAT(Eval("(mylong mylong)0"),
+              IsError("two or more data types in declaration of 'type name'"));
+  EXPECT_THAT(Eval("(unsigned mylong)0"),
+              IsError("cannot combine with previous declaration specifier"));
+  EXPECT_THAT(Eval("(mylong unsigned)0"),
+              IsError("cannot combine with previous declaration specifier"));
 }
 
 TEST_F(EvalTest, TestTemplateTypes) {

@@ -1088,6 +1088,17 @@ void TestTypeComparison() {
   // BREAK(TestTypeComparison)
 }
 
+static void TestTypeDeclaration() {
+  wchar_t wchar = 0;
+  char16_t char16 = 0;
+  char32_t char32 = 0;
+
+  using mylong = long;
+
+  // BREAK(TestBasicTypeDeclaration)
+  // BREAK(TestUserTypeDeclaration)
+}
+
 namespace test_binary {
 
 void main() {
@@ -1113,6 +1124,7 @@ void main() {
   TestCastInheritedTypes();
   TestQualifiedId();
   TestStaticConst();
+  TestTypeDeclaration();
   TestTemplateTypes();
   TestTemplateWithNumericArguments();
   TestValueScope();

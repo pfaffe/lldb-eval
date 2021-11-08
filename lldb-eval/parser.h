@@ -18,6 +18,7 @@
 #define LLDB_EVAL_PARSER_H_
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -37,25 +38,63 @@
 
 namespace lldb_eval {
 
-// TypeDeclaration holds information about the literal type definition. It
-// doesn't perform semantic analysis of the type -- e.g. "long long long" and
-// "char&&&" are valid type declarations.
+// TypeDeclaration builds information about the literal type definition as type
+// is being parsed. It doesn't perform semantic analysis for non-basic types --
+// e.g. "char&&&" is a valid type declaration.
 // NOTE: CV qualifiers are ignored.
 class TypeDeclaration {
  public:
-  // Type declaration is considered valid if it contains at least one typename.
-  bool IsValid() const { return typenames_.size() > 0; }
+  enum class TypeSpecifier {
+    kUnknown,
+    kVoid,
+    kBool,
+    kChar,
+    kShort,
+    kInt,
+    kLong,
+    kLongLong,
+    kFloat,
+    kDouble,
+    kLongDouble,
+    kWChar,
+    kChar16,
+    kChar32,
+  };
 
-  std::string GetName() const;
-  std::string GetBaseName() const;
+  enum class SignSpecifier {
+    kUnknown,
+    kSigned,
+    kUnsigned,
+  };
+
+  bool IsEmpty() const { return !is_builtin_ && !is_user_type_; }
+
+  lldb::BasicType GetBasicType() const;
 
  public:
-  // List of base typenames, e.g. ["long", "long"] or ["uint64_t"].
-  std::vector<std::string> typenames_;
+  // Indicates user-defined typename (e.g. "MyClass", "MyTmpl<int>").
+  std::string user_typename_;
 
-  // Pointer and reference operators (* and &).
-  std::vector<std::tuple<clang::tok::TokenKind, clang::SourceLocation>>
-      ptr_operators_;
+  // Basic type specifier ("void", "char", "int", "long", "long long", etc).
+  TypeSpecifier type_specifier_ = TypeSpecifier::kUnknown;
+
+  // Signedness specifier ("signed", "unsigned").
+  SignSpecifier sign_specifier_ = SignSpecifier::kUnknown;
+
+  // Does the type declaration includes "int" specifier?
+  // This is different than `type_specifier_` and is used to detect "int"
+  // duplication for types that can be combined with "int" specifier (e.g.
+  // "short int", "long int").
+  bool has_int_specifier_ = false;
+
+  // Indicates whether there was an error during parsing.
+  bool has_error_ = false;
+
+  // Indicates whether this declaration describes a builtin type.
+  bool is_builtin_ = false;
+
+  // Indicates whether this declaration describes a user type.
+  bool is_user_type_ = false;
 };
 
 class BuiltinFunctionDef {
@@ -80,6 +119,8 @@ class Parser {
 
   ExprResult Run(Error& error);
 
+  using PtrOperator = std::tuple<clang::tok::TokenKind, clang::SourceLocation>;
+
  private:
   ExprResult ParseExpression();
   ExprResult ParseAssignmentExpression();
@@ -98,7 +139,7 @@ class Parser {
   ExprResult ParsePostfixExpression();
   ExprResult ParsePrimaryExpression();
 
-  TypeDeclaration ParseTypeId();
+  std::optional<lldb::SBType> ParseTypeId(bool must_be_type_id = false);
   void ParseTypeSpecifierSeq(TypeDeclaration* type_decl);
   bool ParseTypeSpecifier(TypeDeclaration* type_decl);
   std::string ParseNestedNameSpecifier();
@@ -107,15 +148,16 @@ class Parser {
   std::string ParseTemplateArgumentList();
   std::string ParseTemplateArgument();
 
-  void ParsePtrOperator(TypeDeclaration* type_decl);
+  PtrOperator ParsePtrOperator();
 
   lldb::SBType ResolveTypeFromTypeDecl(const TypeDeclaration& type_decl);
-  lldb::SBType ResolveTypeDeclarators(lldb::SBType type,
-                                      const TypeDeclaration& type_decl);
+  lldb::SBType ResolveTypeDeclarators(
+      lldb::SBType type, const std::vector<PtrOperator>& ptr_operators);
 
   bool IsSimpleTypeSpecifierKeyword(clang::Token token) const;
   bool IsCvQualifier(clang::Token token) const;
   bool IsPtrOperator(clang::Token token) const;
+  bool HandleSimpleTypeSpecifier(TypeDeclaration* type_decl);
 
   std::string ParseIdExpression();
   std::string ParseUnqualifiedId();
