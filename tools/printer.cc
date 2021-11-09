@@ -33,7 +33,7 @@ std::string print_common_props(const AstNode* node) {
   std::string ret;
 
   ret += "'";
-  ret += node->result_type().GetName();
+  ret += node->result_type()->GetName();
   ret += "'";
   ret += " ";
   ret += node->is_rvalue() ? "rvalue" : "lvalue";
@@ -54,9 +54,23 @@ class AstPrinter : Visitor {
   }
 
   void Visit(const LiteralNode* node) override {
-    std::cout << "LiteralNode " << print_common_props(node) << " "
-              << "value=" << node->value().inner_value().GetValue()
-              << std::endl;
+    std::cout << "LiteralNode " << print_common_props(node) << " value=";
+    struct {
+      void operator()(llvm::APInt val) {
+        std::cout << val.toString(10u, is_signed_);
+      }
+      void operator()(llvm::APFloat val) {
+        llvm::SmallVector<char, 32> buffer;
+        val.toString(buffer);
+        std::cout << std::string(buffer.data(), buffer.size());
+      }
+      void operator()(bool val) { std::cout << val; }
+
+      bool is_signed_;
+    } visitor{node->result_type()->IsInteger() &&
+              node->result_type()->IsSigned()};
+    std::visit(visitor, node->value());
+    std::cout << std::endl;
   }
 
   void Visit(const IdentifierNode* node) override {
@@ -65,8 +79,8 @@ class AstPrinter : Visitor {
   }
 
   void Visit(const SizeOfNode* node) override {
-    std::cout << "SizeOfNode " << print_common_props(node) << " "
-              << "type=" << node->operand().GetName() << std::endl;
+    std::cout << "SizeOfNode " << print_common_props(node)
+              << " type=" << node->operand()->GetName().str() << std::endl;
   }
 
   void Visit(const BuiltinFunctionCallNode* node) override {
@@ -84,21 +98,21 @@ class AstPrinter : Visitor {
 
   void Visit(const CStyleCastNode* node) override {
     std::cout << "CStyleCastNode " << print_common_props(node) << " "
-              << "type=" << node->type().GetName() << std::endl;
+              << "type=" << node->type()->GetName().str() << std::endl;
 
     PrintLastChild(node->rhs());
   }
 
   void Visit(const CxxStaticCastNode* node) override {
     std::cout << "CxxStaticCastNode " << print_common_props(node) << " "
-              << "type=" << node->type().GetName() << std::endl;
+              << "type=" << node->type()->GetName().str() << std::endl;
 
     PrintLastChild(node->rhs());
   }
 
   void Visit(const CxxReinterpretCastNode* node) override {
     std::cout << "CxxReinterpretCastNode " << print_common_props(node) << " "
-              << "type=" << node->type().GetName() << std::endl;
+              << "type=" << node->type()->GetName().str() << std::endl;
 
     PrintLastChild(node->rhs());
   }

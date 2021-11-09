@@ -19,6 +19,7 @@
 #include "clang/Basic/Diagnostic.h"
 #include "clang/Basic/FileManager.h"
 #include "clang/Basic/SourceManager.h"
+#include "lldb-eval/value.h"
 #include "lldb/API/SBExecutionContext.h"
 #include "lldb/API/SBFrame.h"
 #include "lldb/API/SBProcess.h"
@@ -51,43 +52,9 @@ lldb::SBValue CreateSBValue(lldb::SBTarget target, const void* bytes,
 
 namespace lldb_eval {
 
-std::string FormatDiagnostics(const clang::SourceManager& sm,
-                              const std::string& message,
-                              clang::SourceLocation loc) {
-  // Get the source buffer and the location of the current token.
-  llvm::StringRef text = sm.getBufferData(sm.getFileID(loc));
-  size_t loc_offset = sm.getCharacterData(loc) - text.data();
-
-  // Look for the start of the line.
-  size_t line_start = text.rfind('\n', loc_offset);
-  line_start = line_start == llvm::StringRef::npos ? 0 : line_start + 1;
-
-  // Look for the end of the line.
-  size_t line_end = text.find('\n', loc_offset);
-  line_end = line_end == llvm::StringRef::npos ? text.size() : line_end;
-
-  // Get a view of the current line in the source code and the position of the
-  // diagnostics pointer.
-  llvm::StringRef line = text.slice(line_start, line_end);
-  int32_t arrow = sm.getPresumedColumnNumber(loc);
-
-  // Calculate the padding in case we point outside of the expression (this can
-  // happen if the parser expected something, but got EOF).
-  size_t expr_rpad = std::max(0, arrow - static_cast<int32_t>(line.size()));
-  size_t arrow_rpad = std::max(0, static_cast<int32_t>(line.size()) - arrow);
-
-  return llvm::formatv("{0}: {1}\n{2}\n{3}", loc.printToString(sm), message,
-                       llvm::fmt_pad(line, 0, expr_rpad),
-                       llvm::fmt_pad("^", arrow - 1, arrow_rpad));
-}
-
 void Context::SetContextVars(
     std::unordered_map<std::string, lldb::SBValue> context_vars) {
   context_vars_ = std::move(context_vars);
-}
-
-void Context::SetAllowSideEffects(bool allow_side_effects) {
-  allow_side_effects_ = allow_side_effects;
 }
 
 Context::Context(std::string expr, lldb::SBExecutionContext ctx,
@@ -102,23 +69,19 @@ Context::Context(std::string expr, lldb::SBExecutionContext ctx,
   de.setClient(new clang::IgnoringDiagConsumer);
 }
 
-lldb::SBType Context::GetBasicType(lldb::BasicType basic_type) {
+TypeSP Context::GetBasicType(lldb::BasicType basic_type) {
   auto type = basic_types_.find(basic_type);
   if (type != basic_types_.end()) {
     return type->second;
   }
 
   // Get the basic type from the target and cache it for future calls.
-  lldb::SBType ret = ctx_.GetTarget().GetBasicType(basic_type);
+  TypeSP ret = LLDBType::CreateSP(ctx_.GetTarget().GetBasicType(basic_type));
   basic_types_.insert({basic_type, ret});
   return ret;
 }
 
-lldb::SBType Context::GetSizeType() {
-  if (size_type_.IsValid()) {
-    return size_type_;
-  }
-
+lldb::BasicType Context::GetSizeType() {
   // Determine "size_t" based on OS and architecture. It is "unsigned int" on
   // most 32-bit architectures and "unsigned long" on most 64-bit architectures.
   // On 64-bit Windows, it is "unsigned long long". To see a complete definition
@@ -127,23 +90,15 @@ lldb::SBType Context::GetSizeType() {
 
   llvm::Triple triple(llvm::Twine(ctx_.GetTarget().GetTriple()));
   if (triple.isOSWindows()) {
-    size_type_ = triple.isArch64Bit()
-                     ? GetBasicType(lldb::eBasicTypeUnsignedLongLong)
-                     : GetBasicType(lldb::eBasicTypeUnsignedInt);
+    return triple.isArch64Bit() ? lldb::eBasicTypeUnsignedLongLong
+                                : lldb::eBasicTypeUnsignedInt;
   } else {
-    size_type_ = triple.isArch64Bit()
-                     ? GetBasicType(lldb::eBasicTypeUnsignedLong)
-                     : GetBasicType(lldb::eBasicTypeUnsignedInt);
+    return triple.isArch64Bit() ? lldb::eBasicTypeUnsignedLong
+                                : lldb::eBasicTypeUnsignedInt;
   }
-
-  return size_type_;
 }
 
-lldb::SBType Context::GetPtrDiffType() {
-  if (ptrdiff_type_.IsValid()) {
-    return ptrdiff_type_;
-  }
-
+lldb::BasicType Context::GetPtrDiffType() {
   // Determine "ptrdiff_t" based on OS and architecture. It is "int" on most
   // 32-bit architectures and "long" on most 64-bit architectures. On 64-bit
   // Windows, it is "long long". To see a complete definition for all
@@ -152,18 +107,16 @@ lldb::SBType Context::GetPtrDiffType() {
 
   llvm::Triple triple(llvm::Twine(ctx_.GetTarget().GetTriple()));
   if (triple.isOSWindows()) {
-    ptrdiff_type_ = triple.isArch64Bit()
-                        ? GetBasicType(lldb::eBasicTypeLongLong)
-                        : GetBasicType(lldb::eBasicTypeInt);
+    return triple.isArch64Bit() ? lldb::eBasicTypeLongLong
+                                : lldb::eBasicTypeInt;
   } else {
-    ptrdiff_type_ = triple.isArch64Bit() ? GetBasicType(lldb::eBasicTypeLong)
-                                         : GetBasicType(lldb::eBasicTypeInt);
+    return triple.isArch64Bit() ? lldb::eBasicTypeLong : lldb::eBasicTypeInt;
   }
-
-  return ptrdiff_type_;
 }
 
-lldb::SBType Context::ResolveTypeByName(const std::string& name) const {
+TypeSP Context::GetEmptyType() { return LLDBType::CreateSP(lldb::SBType()); }
+
+TypeSP Context::ResolveTypeByName(const std::string& name) const {
   // TODO(b/163308825): Do scope-aware type lookup. Look for the types defined
   // in the current scope (function, class, namespace) and prioritize them.
 
@@ -200,7 +153,7 @@ lldb::SBType Context::ResolveTypeByName(const std::string& name) const {
   if (global_scope) {
     // Look only for full matches when looking for a globally qualified type.
     if (full_match.IsValid()) {
-      return full_match;
+      return LLDBType::CreateSP(full_match);
     }
   } else {
     // TODO(b/163308825): We're looking for type, but there may be multiple
@@ -209,16 +162,16 @@ lldb::SBType Context::ResolveTypeByName(const std::string& name) const {
 
     // Full match is always correct if we're currently in the global scope.
     if (full_match.IsValid()) {
-      return full_match;
+      return LLDBType::CreateSP(full_match);
     }
 
     // If we have partial matches, pick a "random" one.
     if (partial_matches.size() > 0) {
-      return partial_matches.back();
+      return LLDBType::CreateSP(partial_matches.back());
     }
   }
 
-  return lldb::SBType();
+  return LLDBType::CreateSP(lldb::SBType());
 }
 
 static lldb::SBValue LookupStaticIdentifier(lldb::SBTarget target,
@@ -247,11 +200,12 @@ static lldb::SBValue LookupStaticIdentifier(lldb::SBTarget target,
   return lldb::SBValue();
 }
 
-lldb::SBValue Context::LookupIdentifier(const std::string& name) const {
+std::unique_ptr<ParserContext::IdentifierInfo> Context::LookupIdentifier(
+    const std::string& name) const {
   // Lookup context variables first.
   auto context_var = context_vars_.find(name);
   if (context_var != context_vars_.end()) {
-    return context_var->second;
+    return std::make_unique<IdentifierInfo>(context_var->second);
   }
 
   // Internally values don't have global scope qualifier in their names and
@@ -284,7 +238,7 @@ lldb::SBValue Context::LookupIdentifier(const std::string& name) const {
     } else {
       // In a "value" scope `this` refers to the scope object itself.
       if (name_ref == "this") {
-        return scope_.AddressOf();
+        return std::make_unique<IdentifierInfo>(scope_.AddressOf());
       }
       // Lookup the variable as a member of the current scope value.
       value = scope_.GetChildMemberWithName(name_ref.data());
@@ -315,28 +269,26 @@ lldb::SBValue Context::LookupIdentifier(const std::string& name) const {
   if (!value && name_ref.contains("::")) {
     auto [enum_typename, enumerator_name] = name_ref.rsplit("::");
 
-    lldb::SBType type = ResolveTypeByName(enum_typename.str());
-    lldb::SBTypeEnumMemberList members = type.GetEnumMembers();
+    auto type = ResolveTypeByName(enum_typename.str());
+    lldb::SBTypeEnumMemberList members = ToSBType(type).GetEnumMembers();
 
     for (size_t i = 0; i < members.GetSize(); i++) {
       lldb::SBTypeEnumMember member = members.GetTypeEnumMemberAtIndex(i);
       if (member.GetName() == enumerator_name) {
         uint64_t bytes = member.GetValueAsUnsigned();
-        value = CreateSBValue(ctx_.GetTarget(), &bytes, type);
+        value = CreateSBValue(ctx_.GetTarget(), &bytes, ToSBType(type));
         break;
       }
     }
   }
 
   // Force static value, otherwise we can end up with the "real" type.
-  return value.GetStaticValue();
+  return std::make_unique<IdentifierInfo>(value.GetStaticValue());
 }
 
 bool Context::IsContextVar(const std::string& name) const {
   return context_vars_.find(name) != context_vars_.end();
 }
-
-bool Context::AllowSideEffects() const { return allow_side_effects_; }
 
 std::shared_ptr<Context> Context::Create(std::string expr,
                                          lldb::SBFrame frame) {
