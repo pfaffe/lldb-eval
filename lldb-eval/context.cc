@@ -67,6 +67,13 @@ Context::Context(std::string expr, lldb::SBExecutionContext ctx,
   // TODO(werat): Add custom consumer to keep track of errors.
   clang::DiagnosticsEngine& de = smff_->get().getDiagnostics();
   de.setClient(new clang::IgnoringDiagConsumer);
+
+  // If `scope_` is a reference, dereference it. This makes identifier lookup
+  // in the reference value context more convenient (e.g. avoids constructing
+  // qualified name "ScopeType &::IDENTIFIER" for static members).
+  if (scope_ && scope_.GetType().IsReferenceType()) {
+    scope_ = scope_.Dereference();
+  }
 }
 
 TypeSP Context::GetBasicType(lldb::BasicType basic_type) {
