@@ -120,6 +120,8 @@ build --@llvm_project//:llvm_build=static
 ## Publications
 
 * [Blazing fast expression evaluation for C++ in LLDB](https://werat.dev/blog/blazing-fast-expression-evaluation-for-c-in-lldb/)
+* [Building a faster expression evaluator for LLDB](https://www.youtube.com/watch?v=9aThSRGjYdA) at LLVM Developers' Meeting 2021
+* [lldb-eval fuzzer: Finding bugs in an LLDB-based expression evaluator](https://www.youtube.com/watch?v=dJ9k7-pmwvM) at LLVM Developers' Meeting 2021
 
 ## Disclaimer
 
