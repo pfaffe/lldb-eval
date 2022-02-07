@@ -64,13 +64,16 @@ class ParserContext {
       const std::string& name) const = 0;
   virtual bool IsContextVar(const std::string& name) const = 0;
   virtual TypeSP GetBasicType(lldb::BasicType) = 0;
-  virtual TypeSP GetEmptyType() = 0;
+  virtual TypeSP GetEmptyType() const = 0;
   virtual lldb::BasicType GetPtrDiffType() = 0;
   virtual lldb::BasicType GetSizeType() = 0;
   virtual ~ParserContext() = default;
 
   void SetAllowSideEffects(bool allow_side_effects);
   bool AllowSideEffects() const;
+
+  std::tuple<Type::MemberInfo, std::vector<uint32_t>> GetMemberInfo(
+      TypeSP type, const std::string& name) const;
 
  private:
   // Whether side effects should be allowed.
