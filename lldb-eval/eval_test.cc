@@ -15,10 +15,13 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <unordered_map>
 
 #include "lldb-eval/api.h"
+#include "lldb-eval/ast.h"
+#include "lldb-eval/context.h"
 #include "lldb-eval/runner.h"
 #include "lldb-eval/traits.h"
 #include "lldb/API/SBDebugger.h"
@@ -99,6 +102,15 @@ class EvaluatorHelper {
     return ret;
   }
 
+  EvalResult Eval(std::shared_ptr<lldb_eval::CompiledExpr> compiled_expr) {
+    assert(scope_ && "compiled expression requires a value context");
+
+    EvalResult ret;
+    ret.lldb_eval_value = lldb_eval::EvaluateExpression(scope_, compiled_expr,
+                                                        ret.lldb_eval_error);
+    return ret;
+  }
+
   EvalResult EvalWithContext(
       const std::string& expr,
       const std::unordered_map<std::string, lldb::SBValue>& vars) {
@@ -133,6 +145,54 @@ class EvaluatorHelper {
     }
 
     return ret;
+  }
+
+  EvalResult EvalWithContext(
+      std::shared_ptr<lldb_eval::CompiledExpr> compiled_expr,
+      const std::unordered_map<std::string, lldb::SBValue>& vars) {
+    assert(scope_ && "compiled expression requires a value context");
+
+    std::vector<lldb_eval::ContextVariable> ctx_vec;
+    ctx_vec.reserve(vars.size());
+    for (const auto& [name, value] : vars) {
+      ctx_vec.push_back({name.c_str(), value});
+    }
+    lldb_eval::ContextVariableList context_vars{ctx_vec.data(), ctx_vec.size()};
+
+    EvalResult ret;
+    ret.lldb_eval_value = lldb_eval::EvaluateExpression(
+        scope_, compiled_expr, context_vars, ret.lldb_eval_error);
+    return ret;
+  }
+
+  std::shared_ptr<lldb_eval::CompiledExpr> Compile(const std::string& expr,
+                                                   lldb::SBError& error) {
+    assert(scope_ && "compiling an expression requires a type context");
+
+    lldb_eval::Options opts;
+    opts.allow_side_effects = side_effects_;
+    return lldb_eval::CompileExpression(scope_.GetTarget(), scope_.GetType(),
+                                        expr.c_str(), opts, error);
+  }
+
+  std::shared_ptr<lldb_eval::CompiledExpr> CompileWithContext(
+      const std::string& expr,
+      const std::unordered_map<std::string, lldb::SBType>& args,
+      lldb::SBError& error) {
+    assert(scope_ && "compiling an expression requires a type context");
+
+    std::vector<lldb_eval::ContextArgument> ctx_vec;
+    ctx_vec.reserve(args.size());
+    for (const auto& [name, type] : args) {
+      ctx_vec.push_back({name.c_str(), type});
+    }
+
+    lldb_eval::Options opts;
+    opts.allow_side_effects = side_effects_;
+    opts.context_args = {ctx_vec.data(), ctx_vec.size()};
+
+    return lldb_eval::CompileExpression(scope_.GetTarget(), scope_.GetType(),
+                                        expr.c_str(), opts, error);
   }
 
  private:
@@ -3243,4 +3303,68 @@ TEST_F(EvalTest, TestTypeVsIdentifier) {
       Eval("static_cast<CxxEnumOrVar>(0)"),
       IsError(
           "must use 'enum' tag to refer to type 'CxxEnumOrVar' in this scope"));
+}
+
+TEST_F(EvalTest, TestSeparateParsing) {
+  lldb::SBError error;
+
+  auto expr_a = Scope("a").Compile("a_", error);
+  ASSERT_TRUE(error.Success());
+
+  auto expr_b = Scope("b").Compile("b_", error);
+  ASSERT_TRUE(error.Success());
+
+  auto expr_c = Scope("c").Compile("a_ * b_ * c_", error);
+  ASSERT_TRUE(error.Success());
+
+  auto expr_d = Scope("d").Compile("a_ * b_ * c_ * d_", error);
+  ASSERT_TRUE(error.Success());
+
+  auto expr_c_this = Scope("c").Compile("this", error);
+  ASSERT_TRUE(error.Success());
+
+  EXPECT_THAT(Scope("a").Eval(expr_a), IsEqual("1"));
+  EXPECT_THAT(Scope("b").Eval(expr_b), IsEqual("2"));
+  EXPECT_THAT(Scope("c").Eval(expr_c), IsEqual("60"));
+  EXPECT_THAT(Scope("d").Eval(expr_d), IsEqual("3024"));
+
+  EXPECT_THAT(Scope("c").Eval(expr_a), IsEqual("3"));
+  EXPECT_THAT(Scope("c").Eval(expr_b), IsEqual("4"));
+  EXPECT_THAT(Scope("d").Eval(expr_a), IsEqual("6"));
+  EXPECT_THAT(Scope("d").Eval(expr_b), IsEqual("7"));
+  EXPECT_THAT(Scope("d").Eval(expr_c), IsEqual("336"));
+
+  // Expression parsed in derived-type scope, evaluated in base-type scope.
+  EXPECT_THAT(
+      Scope("c").Eval(expr_d),
+      IsError("expression isn't parsed in the context of compatible type"));
+}
+
+TEST_F(EvalTest, TestSeparateParsingWithContextVars) {
+  ASSERT_TRUE(CreateContextVariable("$x", "1"));
+  ASSERT_TRUE(CreateContextVariable("$y", "2.5"));
+
+  std::unordered_map<std::string, lldb::SBType> args = {
+      {"$x", vars_["$x"].GetType()}, {"$y", vars_["$y"].GetType()}};
+
+  lldb::SBError error;
+
+  auto expr_c = Scope("c").CompileWithContext("c_ + $x + $y", args, error);
+  ASSERT_TRUE(error.Success());
+
+  EXPECT_THAT(Scope("c").EvalWithContext(expr_c, vars_), IsEqual("8.5"));
+  EXPECT_THAT(Scope("d").EvalWithContext(expr_c, vars_), IsEqual("11.5"));
+
+  // Parsed context arguments don't match variables' types in evaluation.
+  std::unordered_map<std::string, lldb::SBValue> wrong_vars = {
+      {"$x", vars_["$y"]}, {"$y", vars_["$x"]}};
+  EXPECT_THAT(Scope("c").EvalWithContext(expr_c, wrong_vars),
+              IsError("unexpected type of context variable '$x' (expected "
+                      "'int', got 'double')"));
+
+  // Context variable missing for parsed argument.
+  std::unordered_map<std::string, lldb::SBValue> incomplete_vars = {
+      {"$x", vars_["$x"]}};
+  EXPECT_THAT(Scope("c").EvalWithContext(expr_c, incomplete_vars),
+              IsError("use of undeclared identifier '$y'"));
 }

@@ -17,8 +17,13 @@
 #ifndef LLDB_EVAL_API_H_
 #define LLDB_EVAL_API_H_
 
+#include <memory>
+
+#include "lldb-eval/ast.h"
+#include "lldb-eval/context.h"
 #include "lldb/API/SBError.h"
 #include "lldb/API/SBFrame.h"
+#include "lldb/API/SBTarget.h"
 #include "lldb/API/SBValue.h"
 
 #ifdef _MSC_VER
@@ -52,9 +57,36 @@ struct ContextVariableList {
   size_t size;
 };
 
+// Context arguments are similar to context variables. The difference is that
+// context arguments maps variable names to types. They are intended to be used
+// for parsing and allow re-using parsed expressions with different values of
+// context variables.
+struct ContextArgument {
+  const char* name;
+  lldb::SBType type;
+};
+
+struct ContextArgumentList {
+  const ContextArgument* data;
+  size_t size;
+};
+
 struct Options {
   bool allow_side_effects = false;
+  ContextArgumentList context_args = {};
   ContextVariableList context_vars = {};
+};
+
+struct CompiledExpr {
+  std::shared_ptr<SourceManager> source;
+  std::unique_ptr<AstNode> tree;
+  lldb::SBType scope;
+
+  CompiledExpr(std::shared_ptr<SourceManager> source,
+               std::unique_ptr<AstNode> tree, lldb::SBType scope)
+      : source(std::move(source)),
+        tree(std::move(tree)),
+        scope(std::move(scope)) {}
 };
 
 LLDB_EVAL_API
@@ -72,6 +104,30 @@ lldb::SBValue EvaluateExpression(lldb::SBValue scope, const char* expression,
 LLDB_EVAL_API
 lldb::SBValue EvaluateExpression(lldb::SBValue scope, const char* expression,
                                  Options opts, lldb::SBError& error);
+
+LLDB_EVAL_API
+std::shared_ptr<CompiledExpr> CompileExpression(lldb::SBTarget target,
+                                                lldb::SBType scope,
+                                                const char* expression,
+                                                lldb::SBError& error);
+
+LLDB_EVAL_API
+std::shared_ptr<CompiledExpr> CompileExpression(lldb::SBTarget target,
+                                                lldb::SBType scope,
+                                                const char* expression,
+                                                Options opts,
+                                                lldb::SBError& error);
+
+LLDB_EVAL_API
+lldb::SBValue EvaluateExpression(lldb::SBValue scope,
+                                 std::shared_ptr<CompiledExpr> expression,
+                                 lldb::SBError& error);
+
+LLDB_EVAL_API
+lldb::SBValue EvaluateExpression(lldb::SBValue scope,
+                                 std::shared_ptr<CompiledExpr> expression,
+                                 ContextVariableList context_vars,
+                                 lldb::SBError& error);
 
 }  // namespace lldb_eval
 

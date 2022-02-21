@@ -1149,6 +1149,27 @@ static void TestTypeVsIdentifier() {
   // BREAK(TestTypeVsIdentifier)
 }
 
+static void TestSeparateParsing() {
+  struct StructA {
+    int a_;
+  } a{1};
+
+  struct StructB {
+    int b_;
+  } b{2};
+
+  struct StructC : public StructA, public StructB {
+    int c_;
+  } c{{3}, {4}, 5};
+
+  struct StructD : public StructC {
+    int d_;
+  } d{{{6}, {7}, 8}, 9};
+
+  // BREAK(TestSeparateParsing)
+  // BREAK(TestSeparateParsingWithContextVars)
+}
+
 namespace test_binary {
 
 void main() {
@@ -1196,6 +1217,7 @@ void main() {
   TestSharedPtr();
   TestTypeComparison();
   TestTypeVsIdentifier();
+  TestSeparateParsing();
 
   // BREAK HERE
 }
