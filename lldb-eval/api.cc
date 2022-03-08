@@ -14,6 +14,7 @@
 
 #include "lldb-eval/api.h"
 
+#include <cassert>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -111,6 +112,15 @@ static lldb::SBValue EvaluateExpressionImpl(
   }
 
   return value;
+}
+
+CompiledExpr::CompiledExpr(std::shared_ptr<SourceManager> source,
+                           std::unique_ptr<AstNode> tree, lldb::SBType scope)
+    : source(std::move(source)),
+      tree(std::move(tree)),
+      scope(std::move(scope)) {
+  assert(this->tree && this->tree->result_type() && "ast node should be valid");
+  result_type = ToSBType(this->tree->result_type());
 }
 
 lldb::SBValue EvaluateExpression(lldb::SBFrame frame, const char* expression,
