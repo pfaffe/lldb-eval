@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#ifndef __EMSCRIPTEN__
 #include <memory>
 #include <optional>
 #include <string>
@@ -31,12 +32,14 @@
 #include "lldb/API/SBThread.h"
 #include "lldb/API/SBType.h"
 #include "tools/cpp/runfiles/runfiles.h"
+#endif
 
 // DISALLOW_COPY_AND_ASSIGN is also defined in
 // lldb/lldb-defines.h
 #undef DISALLOW_COPY_AND_ASSIGN
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#ifndef __EMSCRIPTEN__
 
 using bazel::tools::cpp::runfiles::Runfiles;
 
@@ -201,6 +204,7 @@ class EvaluatorHelper {
   bool lldb_;
   bool side_effects_;
 };
+#endif
 
 void PrintError(::testing::MatchResultListener* listener,
                 const std::string& error) {
@@ -214,6 +218,7 @@ void PrintError(::testing::MatchResultListener* listener,
   *listener << error;
 }
 
+#ifndef __EMSCRIPTEN__
 class IsOkMatcher : public MatcherInterface<EvalResult> {
  public:
   explicit IsOkMatcher(bool compare_types) : compare_types_(compare_types) {}
@@ -266,11 +271,13 @@ class IsOkMatcher : public MatcherInterface<EvalResult> {
  private:
   bool compare_types_;
 };
+#endif
 
 Matcher<EvalResult> IsOk(bool compare_types = true) {
   return MakeMatcher(new IsOkMatcher(compare_types));
 }
 
+#ifndef __EMSCRIPTEN__
 class IsEqualMatcher : public MatcherInterface<EvalResult> {
  public:
   IsEqualMatcher(std::string value, bool compare_types)
@@ -331,11 +338,13 @@ class IsEqualMatcher : public MatcherInterface<EvalResult> {
   std::string value_;
   bool compare_types_;
 };
+#endif
 
 Matcher<EvalResult> IsEqual(std::string value, bool compare_types = true) {
   return MakeMatcher(new IsEqualMatcher(std::move(value), compare_types));
 }
 
+#ifndef __EMSCRIPTEN__
 class IsErrorMatcher : public MatcherInterface<EvalResult> {
  public:
   explicit IsErrorMatcher(std::string value) : value_(std::move(value)) {}
@@ -363,11 +372,13 @@ class IsErrorMatcher : public MatcherInterface<EvalResult> {
  private:
   std::string value_;
 };
+#endif
 
 Matcher<EvalResult> IsError(std::string value) {
   return MakeMatcher(new IsErrorMatcher(std::move(value)));
 }
 
+#ifndef __EMSCRIPTEN__
 class EvalTest : public ::testing::Test {
  protected:
   static void SetUpTestSuite() {
@@ -441,6 +452,13 @@ class EvalTest : public ::testing::Test {
     return CreateContextVariable(type, name, true, assignment);
   }
 
+  bool Is32Bit() const {
+    if (process_.GetAddressByteSize() == 4) {
+      return true;
+    }
+    return false;
+  }
+
  protected:
   lldb::SBDebugger debugger_;
   lldb::SBProcess process_;
@@ -464,6 +482,8 @@ TEST_F(EvalTest, TestSymbols) {
   EXPECT_GT(frame_.GetModule().GetNumSymbols(), 0)
       << "No symbols might indicate that the test binary was built incorrectly";
 }
+
+#endif
 
 TEST_F(EvalTest, TestArithmetic) {
   EXPECT_THAT(Eval("1 + 2"), IsEqual("3"));
@@ -565,16 +585,16 @@ TEST_F(EvalTest, TestArithmetic) {
   // Makes sure that the expression isn't parsed as two types `r<r>` and `r`.
   EXPECT_THAT(Eval("(r < r > r)"), IsEqual("false"));
 
-#ifdef _WIN32
   // On Windows sizeof(int) == sizeof(long) == 4.
-  EXPECT_THAT(Eval("(unsigned int)4294967295 + (long)2"), IsEqual("1"));
-  EXPECT_THAT(Eval("((unsigned int)1 + (long)1) - 3"), IsEqual("4294967295"));
-#else
-  // On Linux sizeof(int) == 4 and sizeof(long) == 8.
-  EXPECT_THAT(Eval("(unsigned int)4294967295 + (long)2"),
-              IsEqual("4294967297"));
-  EXPECT_THAT(Eval("((unsigned int)1 + (long)1) - 3"), IsEqual("-1"));
-#endif
+  if (sizeof(int) == sizeof(long)) {
+    EXPECT_THAT(Eval("(unsigned int)4294967295 + (long)2"), IsEqual("1"));
+    EXPECT_THAT(Eval("((unsigned int)1 + (long)1) - 3"), IsEqual("4294967295"));
+  } else {
+    // On Linux sizeof(int) == 4 and sizeof(long) == 8.
+    EXPECT_THAT(Eval("(unsigned int)4294967295 + (long)2"),
+                IsEqual("4294967297"));
+    EXPECT_THAT(Eval("((unsigned int)1 + (long)1) - 3"), IsEqual("-1"));
+  }
 }
 
 TEST_F(EvalTest, TestZeroDivision) {
@@ -706,7 +726,7 @@ TEST_F(EvalTest, TestPointerArithmetic) {
   EXPECT_THAT(Eval("array_ref - 1"), IsOk());
   EXPECT_THAT(
       Eval("1 - array"),
-      IsError("invalid operands to binary expression ('int' and 'int [10]')\n"
+      IsError("invalid operands to binary expression ('int' and 'int[10]')\n"
               "1 - array\n"
               "  ^"));
 
@@ -716,7 +736,7 @@ TEST_F(EvalTest, TestPointerArithmetic) {
   EXPECT_THAT(
       Eval("array + array"),
       IsError(
-          "invalid operands to binary expression ('int [10]' and 'int [10]')\n"
+          "invalid operands to binary expression ('int[10]' and 'int[10]')\n"
           "array + array\n"
           "      ^"));
 }
@@ -779,31 +799,29 @@ TEST_F(EvalTest, PointerIntegerComparison) {
   EXPECT_THAT(Eval("0 == std_nullptr_t"), IsEqual("true"));
   EXPECT_THAT(Eval("std_nullptr_t != 0"), IsEqual("false"));
 
-  EXPECT_THAT(
-      Eval("(void*)0 > nullptr"),
-      IsError(
-          "invalid operands to binary expression ('void *' and 'nullptr_t')"));
+  EXPECT_THAT(Eval("(void*)0 > nullptr"),
+              IsError("invalid operands to binary expression ('void *' and "
+                      "'std::nullptr_t')"));
 
-  EXPECT_THAT(
-      Eval("nullptr > 0"),
-      IsError("invalid operands to binary expression ('nullptr_t' and 'int')"));
+  EXPECT_THAT(Eval("nullptr > 0"),
+              IsError("invalid operands to binary expression ('std::nullptr_t' "
+                      "and 'int')"));
 
-  EXPECT_THAT(
-      Eval("1 == nullptr"),
-      IsError("invalid operands to binary expression ('int' and 'nullptr_t')"));
+  EXPECT_THAT(Eval("1 == nullptr"),
+              IsError("invalid operands to binary expression ('int' and "
+                      "'std::nullptr_t')"));
 
-  EXPECT_THAT(
-      Eval("nullptr == (int)0"),
-      IsError("invalid operands to binary expression ('nullptr_t' and 'int')"));
+  EXPECT_THAT(Eval("nullptr == (int)0"),
+              IsError("invalid operands to binary expression ('std::nullptr_t' "
+                      "and 'int')"));
 
-  EXPECT_THAT(
-      Eval("false == nullptr"),
-      IsError(
-          "invalid operands to binary expression ('bool' and 'nullptr_t')"));
+  EXPECT_THAT(Eval("false == nullptr"),
+              IsError("invalid operands to binary expression ('bool' and "
+                      "'std::nullptr_t')"));
 
-  EXPECT_THAT(
-      Eval("nullptr == (true ? 0 : 0)"),
-      IsError("invalid operands to binary expression ('nullptr_t' and 'int')"));
+  EXPECT_THAT(Eval("nullptr == (true ? 0 : 0)"),
+              IsError("invalid operands to binary expression ('std::nullptr_t' "
+                      "and 'int')"));
 
   // TODO: Enable when we support char literals.
   // EXPECT_THAT(
@@ -811,9 +829,10 @@ TEST_F(EvalTest, PointerIntegerComparison) {
   //     IsError(
   //         "invalid operands to binary expression ('char' and 'nullptr_t')"));
 
-  EXPECT_THAT(Eval("nullptr > nullptr"),
-              IsError("invalid operands to binary expression ('nullptr_t' and "
-                      "'nullptr_t')"));
+  EXPECT_THAT(
+      Eval("nullptr > nullptr"),
+      IsError("invalid operands to binary expression ('std::nullptr_t' and "
+              "'std::nullptr_t')"));
 
   // These are not allowed by C++, but we support it as an extension.
   EXPECT_THAT(Eval("(void*)1 == 1"), IsEqual("true"));
@@ -836,10 +855,14 @@ TEST_F(EvalTest, TestPointerDereference) {
   EXPECT_THAT(Eval("*cp_int5"), IsEqual("5"));
   EXPECT_THAT(Eval("*cp_int5 - 1"), IsEqual("4"));
 
-  EXPECT_THAT(Eval("&*p_null"), IsEqual("0x0000000000000000"));
-  EXPECT_THAT(Eval("&p_null[4]"), IsEqual("0x0000000000000010"));
-  EXPECT_THAT(Eval("&*(int*)0"), IsEqual("0x0000000000000000"));
-  EXPECT_THAT(Eval("&((int*)0)[1]"), IsEqual("0x0000000000000004"));
+  EXPECT_THAT(Eval("&*p_null"),
+              IsEqual(Is32Bit() ? "0x00000000" : "0x0000000000000000"));
+  EXPECT_THAT(Eval("&p_null[4]"),
+              IsEqual(Is32Bit() ? "0x00000010" : "0x0000000000000010"));
+  EXPECT_THAT(Eval("&*(int*)0"),
+              IsEqual(Is32Bit() ? "0x00000000" : "0x0000000000000000"));
+  EXPECT_THAT(Eval("&((int*)0)[1]"),
+              IsEqual(Is32Bit() ? "0x00000004" : "0x0000000000000004"));
 
   EXPECT_THAT(Eval("&p_void[0]"),
               IsError("subscript of pointer to incomplete type 'void'"));
@@ -852,11 +875,12 @@ TEST_F(EvalTest, TestPointerDereference) {
   EXPECT_THAT(Eval("&**pp_int0 + 1"), IsOk());
 
   EXPECT_THAT(Eval("&(true ? *p_null : *p_null)"),
-              IsEqual("0x0000000000000000"));
+              IsEqual(Is32Bit() ? "0x00000000" : "0x0000000000000000"));
+
   EXPECT_THAT(Eval("&(false ? *p_null : *p_null)"),
-              IsEqual("0x0000000000000000"));
+              IsEqual(Is32Bit() ? "0x00000000" : "0x0000000000000000"));
   EXPECT_THAT(Eval("&*(true ? p_null : nullptr)"),
-              IsEqual("0x0000000000000000"));
+              IsEqual(Is32Bit() ? "0x00000000" : "0x0000000000000000"));
 }
 
 TEST_F(EvalTest, TestLogicalOperators) {
@@ -969,7 +993,7 @@ TEST_F(EvalTest, TestMemberOf) {
   EXPECT_THAT(
       Eval("sarr.x"),
       IsError(
-          "member reference base type 'Sx [2]' is not a structure or union"));
+          "member reference base type 'Sx[2]' is not a structure or union"));
 
   // Test for record typedefs.
   EXPECT_THAT(Eval("sa.x"), IsEqual("3"));
@@ -1328,9 +1352,13 @@ TEST_F(EvalTest, TestCStyleCastBasicType) {
   EXPECT_THAT(
       Eval("(char)ap"),
       IsError("cast from pointer to smaller type 'char' loses information"));
-  EXPECT_THAT(
-      Eval("(int)arr"),
-      IsError("cast from pointer to smaller type 'int' loses information"));
+  if (Is32Bit()) {
+    EXPECT_THAT(Eval("(int)arr"), IsOk());
+  } else {
+    EXPECT_THAT(
+        Eval("(int)arr"),
+        IsError("cast from pointer to smaller type 'int' loses information"));
+  }
 
 #ifdef _WIN32
   EXPECT_THAT(
@@ -1352,10 +1380,14 @@ TEST_F(EvalTest, TestCStyleCastPointer) {
   EXPECT_THAT(Eval("(unsigned long long*)vp"), IsOk());
   EXPECT_THAT(Eval("(unsigned short int*)vp"), IsOk());
 
-  EXPECT_THAT(Eval("(void*)0"), IsEqual("0x0000000000000000"));
-  EXPECT_THAT(Eval("(void*)1"), IsEqual("0x0000000000000001"));
-  EXPECT_THAT(Eval("(void*)a"), IsEqual("0x0000000000000001"));
-  EXPECT_THAT(Eval("(void*)na"), IsEqual("0xffffffffffffffff"));
+  EXPECT_THAT(Eval("(void*)0"),
+              IsEqual(Is32Bit() ? "0x00000000" : "0x0000000000000000"));
+  EXPECT_THAT(Eval("(void*)1"),
+              IsEqual(Is32Bit() ? "0x00000001" : "0x0000000000000001"));
+  EXPECT_THAT(Eval("(void*)a"),
+              IsEqual(Is32Bit() ? "0x00000001" : "0x0000000000000001"));
+  EXPECT_THAT(Eval("(void*)na"),
+              IsEqual(Is32Bit() ? "0xffffffff" : "0xffffffffffffffff"));
   EXPECT_THAT(Eval("(int*&)ap"), IsOk());
 
   EXPECT_THAT(
@@ -1377,25 +1409,33 @@ TEST_F(EvalTest, TestCStyleCastPointer) {
   EXPECT_THAT(Eval("(int&*)ap"), IsError("'type name' declared as a pointer "
                                          "to a reference of type 'int &'"));
 
-  EXPECT_THAT(Eval("(std::nullptr_t)nullptr"), IsEqual("0x0000000000000000"));
-  EXPECT_THAT(Eval("(std::nullptr_t)0"), IsEqual("0x0000000000000000"));
+  EXPECT_THAT(Eval("(std::nullptr_t)nullptr"),
+              IsEqual(Is32Bit() ? "0x00000000" : "0x0000000000000000"));
+  EXPECT_THAT(Eval("(std::nullptr_t)0"),
+              IsEqual(Is32Bit() ? "0x00000000" : "0x0000000000000000"));
 
-  EXPECT_THAT(Eval("(std::nullptr_t)1"),
-              IsError("C-style cast from 'int' to 'std::nullptr_t' (aka "
-                      "'nullptr_t') is not allowed"));
-  EXPECT_THAT(Eval("(std::nullptr_t)ap"),
-              IsError("C-style cast from 'int *' to 'std::nullptr_t' (aka "
-                      "'nullptr_t') is not allowed"));
+  EXPECT_THAT(
+      Eval("(std::nullptr_t)1"),
+      IsError("C-style cast from 'int' to 'std::nullptr_t' is not allowed"));
+  EXPECT_THAT(
+      Eval("(std::nullptr_t)ap"),
+      IsError("C-style cast from 'int *' to 'std::nullptr_t' is not allowed"));
 }
 
 TEST_F(EvalTest, TestCStyleCastNullptrType) {
-  EXPECT_THAT(
-      Eval("(int)nullptr"),
-      IsError("cast from pointer to smaller type 'int' loses information"));
+  if (Is32Bit()) {
+    EXPECT_THAT(Eval("(int)nullptr"), IsOk());
+  } else {
+    EXPECT_THAT(
+        Eval("(int)nullptr"),
+        IsError("cast from pointer to smaller type 'int' loses information"));
+  }
   EXPECT_THAT(Eval("(uint64_t)nullptr"), IsEqual("0"));
 
-  EXPECT_THAT(Eval("(void*)nullptr"), IsEqual("0x0000000000000000"));
-  EXPECT_THAT(Eval("(char*)nullptr"), IsEqual("0x0000000000000000"));
+  EXPECT_THAT(Eval("(void*)nullptr"),
+              IsEqual(Is32Bit() ? "0x00000000" : "0x0000000000000000"));
+  EXPECT_THAT(Eval("(char*)nullptr"),
+              IsEqual(Is32Bit() ? "0x00000000" : "0x0000000000000000"));
 }
 
 TEST_F(EvalTest, TestCStyleCastArray) {
@@ -1453,7 +1493,8 @@ TEST_F(EvalTest, TestCxxStaticCast) {
 
   EXPECT_THAT(
       Eval("static_cast<long long>(nullptr)"),
-      IsError("static_cast from 'nullptr_t' to 'long long' is not allowed"));
+      IsError(
+          "static_cast from 'std::nullptr_t' to 'long long' is not allowed"));
   EXPECT_THAT(
       Eval("static_cast<long long>(ptr)"),
       IsError("static_cast from 'int *' to 'long long' is not allowed"));
@@ -1479,7 +1520,7 @@ TEST_F(EvalTest, TestCxxStaticCast) {
 
   EXPECT_THAT(
       Eval("static_cast<UEnum>(nullptr)"),
-      IsError("static_cast from 'nullptr_t' to 'UEnum' is not allowed"));
+      IsError("static_cast from 'std::nullptr_t' to 'UEnum' is not allowed"));
   EXPECT_THAT(Eval("static_cast<UEnum>(ptr)"),
               IsError("static_cast from 'int *' to 'UEnum' is not allowed"));
   EXPECT_THAT(
@@ -1487,14 +1528,15 @@ TEST_F(EvalTest, TestCxxStaticCast) {
       IsError("static_cast from 'CxxParent' to 'SEnum' is not allowed"));
 
   // Cast to pointers.
-  EXPECT_THAT(Eval("static_cast<char*>(0)"), IsEqual("0x0000000000000000"));
+  EXPECT_THAT(Eval("static_cast<char*>(0)"),
+              IsEqual(Is32Bit() ? "0x00000000" : "0x0000000000000000"));
   EXPECT_THAT(Eval("static_cast<long*>(nullptr)"),
-              IsEqual("0x0000000000000000"));
+              IsEqual(Is32Bit() ? "0x00000000" : "0x0000000000000000"));
   EXPECT_THAT(Eval("*static_cast<int*>(arr)"), IsEqual("1"));
   EXPECT_THAT(Eval("*static_cast<td_int_ptr_t>(arr)"), IsEqual("1"));
   EXPECT_THAT(Eval("static_cast<void*>(ptr)"), IsOk());
   EXPECT_THAT(Eval("static_cast<int*>((void*)4)"),
-              IsEqual("0x0000000000000004"));
+              IsEqual(Is32Bit() ? "0x00000004" : "0x0000000000000004"));
   EXPECT_THAT(Eval("static_cast<long*>(ptr)"),
               IsError("static_cast from 'int *' to 'long *' is not allowed"));
   EXPECT_THAT(Eval("static_cast<float*>(arr)"),
@@ -1502,15 +1544,15 @@ TEST_F(EvalTest, TestCxxStaticCast) {
 
   // Cast to nullptr.
   EXPECT_THAT(Eval("static_cast<std::nullptr_t>(nullptr)"),
-              IsEqual("0x0000000000000000"));
+              IsEqual(Is32Bit() ? "0x00000000" : "0x0000000000000000"));
   EXPECT_THAT(Eval("static_cast<std::nullptr_t>(0)"),
-              IsEqual("0x0000000000000000"));
-  EXPECT_THAT(Eval("static_cast<std::nullptr_t>((int)0)"),
-              IsError("static_cast from 'int' to 'std::nullptr_t' (aka "
-                      "'nullptr_t') is not allowed"));
-  EXPECT_THAT(Eval("static_cast<std::nullptr_t>((void*)0)"),
-              IsError("static_cast from 'void *' to 'std::nullptr_t' (aka "
-                      "'nullptr_t') is not allowed"));
+              IsEqual(Is32Bit() ? "0x00000000" : "0x0000000000000000"));
+  EXPECT_THAT(
+      Eval("static_cast<std::nullptr_t>((int)0)"),
+      IsError("static_cast from 'int' to 'std::nullptr_t' is not allowed"));
+  EXPECT_THAT(
+      Eval("static_cast<std::nullptr_t>((void*)0)"),
+      IsError("static_cast from 'void *' to 'std::nullptr_t' is not allowed"));
 
   // Cast to references.
   EXPECT_THAT(Eval("static_cast<int&>(parent.b)"), IsEqual("2"));
@@ -1656,15 +1698,20 @@ TEST_F(EvalTest, TestCxxReinterpretCast) {
   EXPECT_THAT(Eval("reinterpret_cast<long long>(ptr)"), IsOk());
   EXPECT_THAT(Eval("reinterpret_cast<long long>(arr)"), IsOk());
   EXPECT_THAT(Eval("reinterpret_cast<long long>(nullptr)"), IsEqual("0"));
-  EXPECT_THAT(
-      Eval("reinterpret_cast<int>(ptr)"),
-      IsError("cast from pointer to smaller type 'int' loses information"));
+  if (Is32Bit()) {
+    EXPECT_THAT(Eval("reinterpret_cast<int>(ptr)"), IsOk());
+    EXPECT_THAT(Eval("reinterpret_cast<td_int_t>(ptr)"), IsOk());
+  } else {
+    EXPECT_THAT(
+        Eval("reinterpret_cast<int>(ptr)"),
+        IsError("cast from pointer to smaller type 'int' loses information"));
+    EXPECT_THAT(Eval("reinterpret_cast<td_int_t>(ptr)"),
+                IsError("cast from pointer to smaller type 'td_int_t' (aka "
+                        "'int') loses information"));
+  }
   EXPECT_THAT(
       Eval("reinterpret_cast<bool>(arr)"),
       IsError("cast from pointer to smaller type 'bool' loses information"));
-  EXPECT_THAT(Eval("reinterpret_cast<td_int_t>(ptr)"),
-              IsError("cast from pointer to smaller type 'td_int_t' (aka "
-                      "'int') loses information"));
   EXPECT_THAT(
       Eval("reinterpret_cast<bool>(nullptr)"),
       IsError("cast from pointer to smaller type 'bool' loses information"));
@@ -1678,33 +1725,36 @@ TEST_F(EvalTest, TestCxxReinterpretCast) {
 
   // Integers, enums and pointers can be converted to pointers.
   EXPECT_THAT(Eval("reinterpret_cast<int*>(true)"),
-              IsEqual("0x0000000000000001"));
+              IsEqual(Is32Bit() ? "0x00000001" : "0x0000000000000001"));
   EXPECT_THAT(Eval("reinterpret_cast<float*>(6)"),
-              IsEqual("0x0000000000000006"));
+              IsEqual(Is32Bit() ? "0x00000006" : "0x0000000000000006"));
   EXPECT_THAT(Eval("reinterpret_cast<void*>(s_enum)"),
-              IsEqual("0x0000000000000001"));
+              IsEqual(Is32Bit() ? "0x00000001" : "0x0000000000000001"));
   EXPECT_THAT(Eval("reinterpret_cast<CxxBase*>(u_enum)"),
-              IsEqual("0x0000000000000002"));
+              IsEqual(Is32Bit() ? "0x00000002" : "0x0000000000000002"));
   EXPECT_THAT(Eval("reinterpret_cast<td_int_ptr_t>(ptr)"), IsOk());
   EXPECT_THAT(Eval("*reinterpret_cast<UEnum**>(ptr)"),
-              IsEqual("0x0000000200000001"));
+              IsEqual(Is32Bit() ? "0x00000001" : "0x0000000200000001"));
   EXPECT_THAT(Eval("*reinterpret_cast<int*>(arr)"), IsEqual("1"));
   EXPECT_THAT(Eval("*reinterpret_cast<long long*>(arr)"),
               IsEqual("8589934593"));  // 8589934593 == 0x0000000200000001
 
-  // Casting to nullptr_t or nullptr_t to pointer types isn't allowed.
+  // Casting to nullptr_t or nullptr_t to pointer types isn't
+  // allowed.
+  EXPECT_THAT(Eval("reinterpret_cast<void*>(nullptr)"),
+              IsError("reinterpret_cast from 'std::nullptr_t' to 'void "
+                      "*' is not allowed"));
   EXPECT_THAT(
-      Eval("reinterpret_cast<void*>(nullptr)"),
-      IsError("reinterpret_cast from 'nullptr_t' to 'void *' is not allowed"));
-  EXPECT_THAT(Eval("reinterpret_cast<std::nullptr_t>(ptr)"),
-              IsError("reinterpret_cast from 'int *' to 'std::nullptr_t' (aka "
-                      "'nullptr_t') is not allowed"));
-  EXPECT_THAT(Eval("reinterpret_cast<std::nullptr_t>(0)"),
-              IsError("reinterpret_cast from 'int' to 'std::nullptr_t' (aka "
-                      "'nullptr_t') is not allowed"));
+      Eval("reinterpret_cast<std::nullptr_t>(ptr)"),
+      IsError(
+          "reinterpret_cast from 'int *' to 'std::nullptr_t' is not allowed"));
+  EXPECT_THAT(
+      Eval("reinterpret_cast<std::nullptr_t>(0)"),
+      IsError(
+          "reinterpret_cast from 'int' to 'std::nullptr_t' is not allowed"));
   EXPECT_THAT(Eval("reinterpret_cast<std::nullptr_t>(nullptr)"),
-              IsError("reinterpret_cast from 'nullptr_t' to 'std::nullptr_t' "
-                      "(aka 'nullptr_t') is not allowed"));
+              IsError("reinterpret_cast from 'std::nullptr_t' to 'std::nullptr_t' "
+                      "is not allowed"));
 
   // L-values can be converted to reference type.
   EXPECT_THAT(Eval("reinterpret_cast<CxxBase&>(arr[0]).a"), IsEqual("1"));
@@ -1714,9 +1764,9 @@ TEST_F(EvalTest, TestCxxReinterpretCast) {
   EXPECT_THAT(Eval("reinterpret_cast<CxxParent&>(arr).d"), IsEqual("5"));
   EXPECT_THAT(Eval("reinterpret_cast<int&>(parent)"), IsOk());
   EXPECT_THAT(Eval("reinterpret_cast<td_int_ref_t>(ptr)"), IsOk());
-  EXPECT_THAT(
-      Eval("reinterpret_cast<int&>(5)"),
-      IsError("reinterpret_cast from rvalue to reference type 'int &'"));
+  EXPECT_THAT(Eval("reinterpret_cast<int&>(5)"),
+              IsError("reinterpret_cast from rvalue to reference "
+                      "type 'int &'"));
 
   // Is result L-value or R-value?
   EXPECT_THAT(Eval("&reinterpret_cast<int&>(arr[0])"), IsOk());
@@ -1757,12 +1807,14 @@ TEST_F(EvalTest, DISABLED_TestStaticConstDeclaredInline) {
   EXPECT_THAT(Eval("Vars::inline_static"), IsEqual("7.5"));
   EXPECT_THAT(Eval("Vars::static_constexpr"), IsEqual("8"));
 
+#ifndef __EMSCRIPTEN__
   EXPECT_THAT(Scope("outer_inner_vars").Eval("inline_static"), IsEqual("1.5"));
   EXPECT_THAT(Scope("outer_inner_vars").Eval("static_constexpr"), IsEqual("2"));
   EXPECT_THAT(Scope("outer_vars").Eval("inline_static"), IsEqual("4.5"));
   EXPECT_THAT(Scope("outer_vars").Eval("static_constexpr"), IsEqual("5"));
   EXPECT_THAT(Scope("vars").Eval("inline_static"), IsEqual("7.5"));
   EXPECT_THAT(Scope("vars").Eval("inline_static"), IsEqual("8"));
+#endif
 }
 
 TEST_F(EvalTest, TestStaticConstDeclaredOutsideTheClass) {
@@ -1786,6 +1838,7 @@ TEST_F(EvalTest, TestStaticConstDeclaredOutsideTheClass) {
   EXPECT_THAT(Eval("::Vars::Nested::static_const"), IsEqual("30"));
   EXPECT_THAT(Eval("Vars::Nested::static_const"), IsEqual("30"));
 
+#ifndef __EMSCRIPTEN__
   EXPECT_THAT(Scope("outer_inner_vars").Eval("static_const"), IsEqual("3"));
   EXPECT_THAT(Scope("outer_vars").Eval("static_const"), IsEqual("6"));
   EXPECT_THAT(Scope("vars").Eval("static_const"), IsEqual("9"));
@@ -1815,19 +1868,20 @@ TEST_F(EvalTest, TestStaticConstDeclaredOutsideTheClass) {
               IsError("use of undeclared identifier '::static_const'"));
   EXPECT_THAT(Scope("my_vars").Eval("::Nested::static_const"),
               IsError("use of undeclared identifier '::Nested::static_const'"));
+#endif
 }
 
 TEST_F(EvalTest, TestBasicTypeDeclaration) {
   EXPECT_THAT(Eval("(char)65"), IsEqual("'A'"));
   EXPECT_THAT(Eval("(char unsigned)65"), IsEqual("'A'"));
   EXPECT_THAT(Eval("(signed char)65"), IsEqual("'A'"));
-#ifdef _WIN32
-  // Size of "wchar_t" is 2 bytes on Windows.
-  EXPECT_THAT(Eval("(wchar_t)0x4141"), IsEqual("AA"));
-#else
-  // Size of "wchar_t" is 4 bytes on Linux.
-  EXPECT_THAT(Eval("(wchar_t)0x41414141"), IsEqual("AAAA"));
-#endif
+  if (sizeof(wchar_t) == 2) {
+    // Size of "wchar_t" is 2 bytes on Windows.
+    EXPECT_THAT(Eval("(wchar_t)0x4141"), IsEqual("AA"));
+  } else {
+    // Size of "wchar_t" is 4 bytes on Linux.
+    EXPECT_THAT(Eval("(wchar_t)0x41414141"), IsEqual("AAAA"));
+  }
   EXPECT_THAT(Eval("(char16_t)0x4141"), IsEqual("U+4141"));
   EXPECT_THAT(Eval("(char32_t)0x4141"), IsEqual("U+0x00004141"));
   EXPECT_THAT(Eval("(int short)-1"), IsEqual("-1"));
@@ -1844,15 +1898,15 @@ TEST_F(EvalTest, TestBasicTypeDeclaration) {
   EXPECT_THAT(Eval("(long)-1"), IsEqual("-1"));
   EXPECT_THAT(Eval("(signed long)-1"), IsEqual("-1"));
   EXPECT_THAT(Eval("(long int signed)-1"), IsEqual("-1"));
-#ifdef _WIN32
-  // Size of "long" is 4 bytes on Windows.
-  EXPECT_THAT(Eval("(unsigned long)-1"), IsEqual("4294967295"));
-  EXPECT_THAT(Eval("(int long unsigned)-1"), IsEqual("4294967295"));
-#else
-  // Size of "long" is 8 bytes on Linux.
-  EXPECT_THAT(Eval("(unsigned long)-1"), IsEqual("18446744073709551615"));
-  EXPECT_THAT(Eval("(int long unsigned)-1"), IsEqual("18446744073709551615"));
-#endif
+  if (sizeof(long) == 4) {
+    // Size of "long" is 4 bytes on Windows.
+    EXPECT_THAT(Eval("(unsigned long)-1"), IsEqual("4294967295"));
+    EXPECT_THAT(Eval("(int long unsigned)-1"), IsEqual("4294967295"));
+  } else {
+    // Size of "long" is 8 bytes on Linux.
+    EXPECT_THAT(Eval("(unsigned long)-1"), IsEqual("18446744073709551615"));
+    EXPECT_THAT(Eval("(int long unsigned)-1"), IsEqual("18446744073709551615"));
+  }
   EXPECT_THAT(Eval("(long long)-1"), IsEqual("-1"));
   EXPECT_THAT(Eval("(long long int)-1"), IsEqual("-1"));
   EXPECT_THAT(Eval("(int signed long long)-1"), IsEqual("-1"));
@@ -1871,8 +1925,10 @@ TEST_F(EvalTest, TestBasicTypeDeclaration) {
 #endif
   EXPECT_THAT(Eval("(bool)1.5"), IsEqual("true"));
 
-  EXPECT_THAT(Eval("(void*)0"), IsEqual("0x0000000000000000"));
-  EXPECT_THAT(Eval("(unsigned**)0"), IsEqual("0x0000000000000000"));
+  EXPECT_THAT(Eval("(void*)0"),
+              IsEqual(Is32Bit() ? "0x00000000" : "0x0000000000000000"));
+  EXPECT_THAT(Eval("(unsigned**)0"),
+              IsEqual(Is32Bit() ? "0x00000000" : "0x0000000000000000"));
 
   EXPECT_THAT(
       Eval("(int int)0"),
@@ -1953,7 +2009,7 @@ TEST_F(EvalTest, TestUserTypeDeclaration) {
 TEST_F(EvalTest, TestTemplateTypes) {
   // Template types lookup doesn't work well in the upstream LLDB.
   this->compare_with_lldb_ = false;
-
+#ifndef __EMSCRIPTEN__
   // Get the pointer value and use it to check the expressions with lldb-eval.
   auto expected = frame_.EvaluateExpression("p").GetValue();
 
@@ -1974,6 +2030,7 @@ TEST_F(EvalTest, TestTemplateTypes) {
   EXPECT_THAT(Eval("(::ns::T_1<int>*)p"), IsEqual(expected));
   EXPECT_THAT(Eval("(ns::T_1<ns::T_1<int> >*)p"), IsEqual(expected));
   EXPECT_THAT(Eval("(::ns::T_1<ns::T_1<int> >*)p"), IsEqual(expected));
+#endif
 #ifdef _WIN32
   EXPECT_THAT(
       Eval("ns::T_1<ns::T_1<int> >::cx"),
@@ -2032,14 +2089,16 @@ TEST_F(EvalTest, TestTemplateWithNumericArguments) {
   // Template types lookup doesn't work well in the upstream LLDB.
   this->compare_with_lldb_ = false;
 
-  EXPECT_THAT(Eval("(Allocator<4>*)0"), IsEqual("0x0000000000000000"));
+  EXPECT_THAT(Eval("(Allocator<4>*)0"),
+              IsEqual(Is32Bit() ? "0x00000000" : "0x0000000000000000"));
   EXPECT_THAT(Eval("(TArray<int, Allocator<4> >::ElementType*)0"),
-              IsEqual("0x0000000000000000"));
+              IsEqual(Is32Bit() ? "0x00000000" : "0x0000000000000000"));
   // Test C++11's ">>" syntax.
   EXPECT_THAT(Eval("(TArray<int, Allocator<4>>::ElementType*)0"),
-              IsEqual("0x0000000000000000"));
+              IsEqual(Is32Bit() ? "0x00000000" : "0x0000000000000000"));
 }
 
+#ifndef __EMSCRIPTEN__
 TEST_F(EvalTest, TestValueScope) {
   EXPECT_THAT(Scope("var").Eval("x_"), IsEqual("1"));
   EXPECT_THAT(Scope("var").Eval("y_"), IsEqual("2.5"));
@@ -2093,43 +2152,52 @@ TEST_F(EvalTest, TestReferenceScope) {
   EXPECT_THAT(Scope("var_ref").Eval("this->static_var"),
               IsError("no member named 'static_var' in 'test_scope::Value'"));
 }
+#endif
 
 TEST_F(EvalTest, TestBitField) {
   EXPECT_THAT(Eval("bf.a"), IsEqual("1023"));
   EXPECT_THAT(Eval("bf.b"), IsEqual("9"));
   EXPECT_THAT(Eval("bf.c"), IsEqual("false"));
   EXPECT_THAT(Eval("bf.d"), IsEqual("true"));
+#ifndef __EMSCRIPTEN__
   EXPECT_THAT(Scope("bf").Eval("a"), IsEqual("1023"));
   EXPECT_THAT(Scope("bf").Eval("b"), IsEqual("9"));
   EXPECT_THAT(Scope("bf").Eval("c"), IsEqual("false"));
   EXPECT_THAT(Scope("bf").Eval("d"), IsEqual("true"));
+#endif
 
   // Perform an operation to ensure we actually read the value.
   EXPECT_THAT(Eval("0 + bf.a"), IsEqual("1023"));
   EXPECT_THAT(Eval("0 + bf.b"), IsEqual("9"));
   EXPECT_THAT(Eval("0 + bf.c"), IsEqual("0"));
   EXPECT_THAT(Eval("0 + bf.d"), IsEqual("1"));
+#ifndef __EMSCRIPTEN__
   EXPECT_THAT(Scope("bf").Eval("0 + a"), IsEqual("1023"));
   // TODO: Enable type comparison after fixing bitfield promotion in value
   // context.
   EXPECT_THAT(Scope("bf").Eval("0 + b"), IsEqual("9", /*compare_types*/ false));
   EXPECT_THAT(Scope("bf").Eval("0 + c"), IsEqual("0"));
   EXPECT_THAT(Scope("bf").Eval("0 + d"), IsEqual("1"));
+#endif
 
   EXPECT_THAT(Eval("abf.a"), IsEqual("1023"));
   EXPECT_THAT(Eval("abf.b"), IsEqual("'\\x0f'"));
   EXPECT_THAT(Eval("abf.c"), IsEqual("3"));
+#ifndef __EMSCRIPTEN__
   EXPECT_THAT(Scope("abf").Eval("a"), IsEqual("1023"));
   EXPECT_THAT(Scope("abf").Eval("b"), IsEqual("'\\x0f'"));
   EXPECT_THAT(Scope("abf").Eval("c"), IsEqual("3"));
+#endif
 
   // Perform an operation to ensure we actually read the value.
   EXPECT_THAT(Eval("abf.a + 0"), IsEqual("1023"));
   EXPECT_THAT(Eval("abf.b + 0"), IsEqual("15"));
   EXPECT_THAT(Eval("abf.c + 0"), IsEqual("3"));
+#ifndef __EMSCRIPTEN__
   EXPECT_THAT(Scope("abf").Eval("0 + a"), IsEqual("1023"));
   EXPECT_THAT(Scope("abf").Eval("0 + b"), IsEqual("15"));
   EXPECT_THAT(Scope("abf").Eval("0 + c"), IsEqual("3"));
+#endif
 
   // Address-of is not allowed for bit-fields.
   EXPECT_THAT(Eval("&bf.a"), IsError("address of bit-field requested"));
@@ -2162,6 +2230,7 @@ TEST_F(EvalTest, TestBitFieldPromotion) {
   // correctly retrieved from identifier lookup.
 }
 
+#ifndef __EMSCRIPTEN__
 TEST_F(EvalTest, TestBitFieldWithSideEffects) {
   this->compare_with_lldb_ = false;
   this->allow_side_effects_ = true;
@@ -2245,6 +2314,7 @@ TEST_F(EvalTest, TestContextVariablesSubset) {
   EXPECT_THAT(Scope("s").EvalWithContext("$var + *$ptr", ptr),
               IsError("use of undeclared identifier '$var'"));
 }
+#endif
 
 TEST_F(EvalTest, TestScopedEnum) {
   EXPECT_THAT(Eval("enum_foo"), IsEqual("kFoo"));
@@ -2277,8 +2347,10 @@ TEST_F(EvalTest, TestScopedEnum) {
   EXPECT_THAT(Eval("(int)enum_neg"), IsEqual("-1"));
   EXPECT_THAT(Eval("(unsigned short)enum_neg"), IsEqual("65535"));
   EXPECT_THAT(Eval("(short)ScopedEnum::kBar"), IsEqual("1"));
-  EXPECT_THAT(Eval("(short*)enum_neg"), IsEqual("0xffffffffffffffff"));
-  EXPECT_THAT(Eval("(char*)enum_u8_bar"), IsEqual("0x0000000000000001"));
+  EXPECT_THAT(Eval("(short*)enum_neg"),
+              IsEqual(Is32Bit() ? "0xffffffff" : "0xffffffffffffffff"));
+  EXPECT_THAT(Eval("(char*)enum_u8_bar"),
+              IsEqual(Is32Bit() ? "0x00000001" : "0x0000000000000001"));
   EXPECT_THAT(Eval("(float)enum_bar"), IsEqual("1"));
   EXPECT_THAT(Eval("(float)enum_foo"), IsEqual("0"));
   EXPECT_THAT(Eval("(float)enum_neg"), IsEqual("-1"));
@@ -2368,7 +2440,8 @@ TEST_F(EvalTest, TestUnscopedEnum) {
   EXPECT_THAT(Eval("(UnscopedEnum)false"), IsEqual("kZero"));
   EXPECT_THAT(Eval("(UnscopedEnum)true"), IsEqual("kOne"));
   EXPECT_THAT(Eval("(UnscopedEnum)(UnscopedEnum)0"), IsEqual("kZero"));
-  EXPECT_THAT(Eval("(void*)(UnscopedEnum)1"), IsEqual("0x0000000000000001"));
+  EXPECT_THAT(Eval("(void*)(UnscopedEnum)1"),
+              IsEqual(Is32Bit() ? "0x00000001" : "0x0000000000000001"));
 
   bool compare_types = HAS_METHOD(lldb::SBType, GetEnumerationIntegerType());
 
@@ -2390,8 +2463,10 @@ TEST_F(EvalTest, TestUnscopedEnum) {
   EXPECT_THAT(Eval("UnscopedEnumInt8::kTwo8 << 1U"), IsEqual("4"));
   EXPECT_THAT(Eval("+enum_one"), IsEqual("1", compare_types));
   EXPECT_THAT(Eval("!enum_one"), IsEqual("false"));
-  EXPECT_THAT(Eval("(int*)1 + enum_one"), IsEqual("0x0000000000000005"));
-  EXPECT_THAT(Eval("(int*)5 - enum_one"), IsEqual("0x0000000000000001"));
+  EXPECT_THAT(Eval("(int*)1 + enum_one"),
+              IsEqual(Is32Bit() ? "0x00000005" : "0x0000000000000005"));
+  EXPECT_THAT(Eval("(int*)5 - enum_one"),
+              IsEqual(Is32Bit() ? "0x00000001" : "0x0000000000000001"));
 
   // Use references.
   EXPECT_THAT(Eval("enum_one_ref"), IsEqual("kOne"));
@@ -2418,13 +2493,15 @@ TEST_F(EvalTest, TestUnscopedEnum) {
   EXPECT_THAT(Eval("1 << enum_two_ref"), IsEqual("4"));
   EXPECT_THAT(Eval("+enum_one_ref"), IsEqual("1", compare_types));
   EXPECT_THAT(Eval("!enum_one_ref"), IsEqual("false"));
-  EXPECT_THAT(Eval("(int*)1 + enum_one_ref"), IsEqual("0x0000000000000005"));
-  EXPECT_THAT(Eval("(int*)5 - enum_one_ref"), IsEqual("0x0000000000000001"));
+  EXPECT_THAT(Eval("(int*)1 + enum_one_ref"),
+              IsEqual(Is32Bit() ? "0x00000005" : "0x0000000000000005"));
+  EXPECT_THAT(Eval("(int*)5 - enum_one_ref"),
+              IsEqual(Is32Bit() ? "0x00000001" : "0x0000000000000001"));
 
   EXPECT_THAT(Eval("(long long)UnscopedEnum::kTwo"), IsEqual("2"));
   EXPECT_THAT(Eval("(unsigned int)enum_one"), IsEqual("1"));
   EXPECT_THAT(Eval("(short*)UnscopedEnumUInt8::kTwoU8"),
-              IsEqual("0x0000000000000002"));
+              IsEqual(Is32Bit() ? "0x00000002" : "0x0000000000000002"));
   EXPECT_THAT(Eval("(float)UnscopedEnum::kOne"), IsEqual("1"));
   EXPECT_THAT(Eval("(float)enum_two"), IsEqual("2"));
   EXPECT_THAT(Eval("(double)enum_one"), IsEqual("1"));
@@ -2473,21 +2550,30 @@ TEST_F(EvalTest, TestTernaryOperator) {
   EXPECT_THAT(Eval("false ? c : b_enum"), IsEqual("1", compare_types));
   EXPECT_THAT(Eval("false ? b_enum : c"), IsEqual("2", compare_types));
 
-  EXPECT_THAT(Eval("true ? (int*)15 : 0"), IsEqual("0x000000000000000f"));
-  EXPECT_THAT(Eval("true ? 0 : (int*)15"), IsEqual("0x0000000000000000"));
-  EXPECT_THAT(Eval("true ? (int*)15 : nullptr"), IsEqual("0x000000000000000f"));
-  EXPECT_THAT(Eval("true ? nullptr : (int*)15"), IsEqual("0x0000000000000000"));
-  EXPECT_THAT(Eval("true ? 0 : nullptr"), IsEqual("0x0000000000000000"));
-  EXPECT_THAT(Eval("true ? nullptr : 0"), IsEqual("0x0000000000000000"));
+  EXPECT_THAT(Eval("true ? (int*)15 : 0"),
+              IsEqual(Is32Bit() ? "0x0000000f" : "0x000000000000000f"));
+  EXPECT_THAT(Eval("true ? 0 : (int*)15"),
+              IsEqual(Is32Bit() ? "0x00000000" : "0x0000000000000000"));
+  EXPECT_THAT(Eval("true ? (int*)15 : nullptr"),
+              IsEqual(Is32Bit() ? "0x0000000f" : "0x000000000000000f"));
+  EXPECT_THAT(Eval("true ? nullptr : (int*)15"),
+              IsEqual(Is32Bit() ? "0x00000000" : "0x0000000000000000"));
+  EXPECT_THAT(Eval("true ? 0 : nullptr"),
+              IsEqual(Is32Bit() ? "0x00000000" : "0x0000000000000000"));
+  EXPECT_THAT(Eval("true ? nullptr : 0"),
+              IsEqual(Is32Bit() ? "0x00000000" : "0x0000000000000000"));
 
   EXPECT_THAT(Eval("+(true ? arr2 : arr2)"), IsOk());
   EXPECT_THAT(Eval("true ? arr2 : arr3"), IsOk());
   EXPECT_THAT(Eval("true ? arr2 : 0"), IsOk());
-  EXPECT_THAT(Eval("true ? 0 : arr2"), IsEqual("0x0000000000000000"));
+  EXPECT_THAT(Eval("true ? 0 : arr2"),
+              IsEqual(Is32Bit() ? "0x00000000" : "0x0000000000000000"));
   EXPECT_THAT(Eval("true ? arr2 : nullptr"), IsOk());
-  EXPECT_THAT(Eval("true ? nullptr : arr2"), IsEqual("0x0000000000000000"));
+  EXPECT_THAT(Eval("true ? nullptr : arr2"),
+              IsEqual(Is32Bit() ? "0x00000000" : "0x0000000000000000"));
   EXPECT_THAT(Eval("true ? arr2 : (int*)15"), IsOk());
-  EXPECT_THAT(Eval("true ? (int*)15 : arr2"), IsEqual("0x000000000000000f"));
+  EXPECT_THAT(Eval("true ? (int*)15 : arr2"),
+              IsEqual(Is32Bit() ? "0x0000000f" : "0x000000000000000f"));
 
   EXPECT_THAT(Eval("&(true ? arr2 : arr2)"), IsOk());
 
@@ -2521,10 +2607,12 @@ TEST_F(EvalTest, TestTernaryOperator) {
                       "&(true ? arr2 : arr3)\n"
                       "^"));
 
-  EXPECT_THAT(Eval("true ? nullptr : pi"), IsEqual("0x0000000000000000"));
+  EXPECT_THAT(Eval("true ? nullptr : pi"),
+              IsEqual(Is32Bit() ? "0x00000000" : "0x0000000000000000"));
   EXPECT_THAT(Eval("true ? pi : nullptr"), IsOk());
   EXPECT_THAT(Eval("false ? nullptr : pi"), IsOk());
-  EXPECT_THAT(Eval("false ? pi : nullptr"), IsEqual("0x0000000000000000"));
+  EXPECT_THAT(Eval("false ? pi : nullptr"),
+              IsEqual(Is32Bit() ? "0x00000000" : "0x0000000000000000"));
 
   // Use pointers and arrays in bool context.
   EXPECT_THAT(Eval("pi ? 1 : 2"), IsEqual("1"));
@@ -2535,15 +2623,15 @@ TEST_F(EvalTest, TestTernaryOperator) {
 TEST_F(EvalTest, TestSizeOf) {
   EXPECT_THAT(Eval("sizeof(int)"), IsEqual("4"));
   EXPECT_THAT(Eval("sizeof(int&)"), IsEqual("4"));
-  EXPECT_THAT(Eval("sizeof(int*)"), IsEqual("8"));
-  EXPECT_THAT(Eval("sizeof(int***)"), IsEqual("8"));
+  EXPECT_THAT(Eval("sizeof(int*)"), IsEqual(Is32Bit() ? "4" : "8"));
+  EXPECT_THAT(Eval("sizeof(int***)"), IsEqual(Is32Bit() ? "4" : "8"));
 
   EXPECT_THAT(Eval("sizeof(i)"), IsEqual("4"));
   EXPECT_THAT(Eval("sizeof i "), IsEqual("4"));
-  EXPECT_THAT(Eval("sizeof p "), IsEqual("8"));
+  EXPECT_THAT(Eval("sizeof p "), IsEqual(Is32Bit() ? "4" : "8"));
   EXPECT_THAT(Eval("sizeof(arr)"), IsEqual("12"));
   EXPECT_THAT(Eval("sizeof arr "), IsEqual("12"));
-  EXPECT_THAT(Eval("sizeof(arr + 1)"), IsEqual("8"));
+  EXPECT_THAT(Eval("sizeof(arr + 1)"), IsEqual(Is32Bit() ? "4" : "8"));
   EXPECT_THAT(Eval("sizeof arr + 1 "), IsEqual("13"));
 
   EXPECT_THAT(Eval("sizeof(foo)"), IsEqual("8"));
@@ -2629,6 +2717,7 @@ TEST_F(EvalTest, TestPrefixIncDec) {
   EXPECT_THAT(Eval("--i"),
               IsError("side effects are not supported in this context"));
 
+#ifndef __EMSCRIPTEN__
   ASSERT_TRUE(CreateContextVariableArray("int", "$arr", "{1,2,3}"));
   EXPECT_THAT(EvalWithContext("++$arr", vars_),
               IsError("cannot increment value of type 'int [3]'"));
@@ -2656,12 +2745,15 @@ TEST_F(EvalTest, TestPrefixIncDec) {
   EXPECT_THAT(EvalWithContext("--$d - 1", vars_), IsEqual("0.5"));
 
   ASSERT_TRUE(CreateContextVariable("$p", "(int*)4"));
-  EXPECT_THAT(EvalWithContext("++$p", vars_), IsEqual("0x0000000000000008"));
+  EXPECT_THAT(EvalWithContext("++$p", vars_),
+              IsEqual(Is32Bit() ? "0x00000008" : "0x0000000000000008"));
   EXPECT_THAT(EvalWithContext("++$p + 1", vars_),
-              IsEqual("0x0000000000000010"));
-  EXPECT_THAT(EvalWithContext("--$p", vars_), IsEqual("0x0000000000000008"));
+              IsEqual(Is32Bit() ? "0x00000010" : "0x0000000000000010"));
+  EXPECT_THAT(EvalWithContext("--$p", vars_),
+              IsEqual(Is32Bit() ? "0x00000008" : "0x0000000000000008"));
   EXPECT_THAT(EvalWithContext("--$p - 1", vars_),
-              IsEqual("0x0000000000000000"));
+              IsEqual(Is32Bit() ? "0x00000000" : "0x0000000000000000"));
+#endif
 }
 
 TEST_F(EvalTest, TestPostfixIncDec) {
@@ -2669,6 +2761,7 @@ TEST_F(EvalTest, TestPostfixIncDec) {
   EXPECT_THAT(Eval("i--"),
               IsError("side effects are not supported in this context"));
 
+#ifndef __EMSCRIPTEN__
   ASSERT_TRUE(CreateContextVariableArray("int", "$arr", "{1,2,3}"));
   EXPECT_THAT(EvalWithContext("$arr--", vars_),
               IsError("cannot decrement value of type 'int [3]'"));
@@ -2698,14 +2791,18 @@ TEST_F(EvalTest, TestPostfixIncDec) {
   EXPECT_THAT(EvalWithContext("$d-- - 1", vars_), IsEqual("1.5"));
 
   ASSERT_TRUE(CreateContextVariable("$p", "(int*)4"));
-  EXPECT_THAT(EvalWithContext("$p++", vars_), IsEqual("0x0000000000000004"));
+  EXPECT_THAT(EvalWithContext("$p++", vars_),
+              IsEqual(Is32Bit() ? "0x00000004" : "0x0000000000000004"));
   EXPECT_THAT(EvalWithContext("$p++ + 1", vars_),
-              IsEqual("0x000000000000000c"));
-  EXPECT_THAT(EvalWithContext("$p--", vars_), IsEqual("0x000000000000000c"));
+              IsEqual(Is32Bit() ? "0x0000000c" : "0x000000000000000c"));
+  EXPECT_THAT(EvalWithContext("$p--", vars_),
+              IsEqual(Is32Bit() ? "0x0000000c" : "0x000000000000000c"));
   EXPECT_THAT(EvalWithContext("$p-- - 1", vars_),
-              IsEqual("0x0000000000000004"));
+              IsEqual(Is32Bit() ? "0x00000004" : "0x0000000000000004"));
+#endif
 }
 
+#ifndef __EMSCRIPTEN__
 TEST_F(EvalTest, TestDereferencedType) {
   // When dereferencing the value LLDB also removes the typedef and the
   // resulting value has the canonical type. We have to mitigate that, because
@@ -2734,6 +2831,7 @@ TEST_F(EvalTest, TestDereferencedType) {
     ASSERT_STREQ(ret.lldb_value.value().GetTypeName(), "TPair");
   }
 }
+#endif
 
 TEST_F(EvalTest, TestMemberFunctionCall) {
   // LLDB supports function calls, so disable it.
@@ -2752,6 +2850,7 @@ TEST_F(EvalTest, TestAssignment) {
   EXPECT_THAT(Eval("eOne = 1"),
               IsError("no known conversion from 'int' to 'Enum'"));
 
+#ifndef __EMSCRIPTEN__
   ASSERT_TRUE(CreateContextVariable("$i", "1"));
   EXPECT_THAT(EvalWithContext("$i = 2", vars_), IsEqual("2"));
   EXPECT_THAT(EvalWithContext("$i", vars_), IsEqual("2"));
@@ -2776,11 +2875,13 @@ TEST_F(EvalTest, TestAssignment) {
   EXPECT_THAT(EvalWithContext("$p = 1", vars_),
               IsError("no known conversion from 'int' to 'int *'"));
   EXPECT_THAT(EvalWithContext("$p = (int*)12", vars_),
-              IsEqual("0x000000000000000c"));
-  EXPECT_THAT(EvalWithContext("$p", vars_), IsEqual("0x000000000000000c"));
-  EXPECT_THAT(EvalWithContext("$p = 0", vars_), IsEqual("0x0000000000000000"));
+              IsEqual(Is32Bit() ? "0x0000000c" : "0x000000000000000c"));
+  EXPECT_THAT(EvalWithContext("$p", vars_),
+              IsEqual(Is32Bit() ? "0x0000000c" : "0x000000000000000c"));
+  EXPECT_THAT(EvalWithContext("$p = 0", vars_),
+              IsEqual(Is32Bit() ? "0x00000000" : "0x0000000000000000"));
   EXPECT_THAT(EvalWithContext("$p = nullptr", vars_),
-              IsEqual("0x0000000000000000"));
+              IsEqual(Is32Bit() ? "0x00000000" : "0x0000000000000000"));
 
   ASSERT_TRUE(CreateContextVariableArray("int", "$arr", "{1, 2}"));
   EXPECT_THAT(EvalWithContext("$p = $arr", vars_), IsOk());
@@ -2788,6 +2889,7 @@ TEST_F(EvalTest, TestAssignment) {
   ASSERT_TRUE(CreateContextVariableArray("float", "$farr", "{1.f, 2.f}"));
   EXPECT_THAT(EvalWithContext("$p = $farr", vars_),
               IsError("no known conversion from 'float [2]' to 'int *'"));
+#endif
 }
 
 TEST_F(EvalTest, TestCompositeAssignmentInvalid) {
@@ -2809,6 +2911,7 @@ TEST_F(EvalTest, TestCompositeAssignmentInvalid) {
       Eval("f %= 1"),
       IsError("invalid operands to binary expression ('float' and 'int')"));
 
+#ifndef __EMSCRIPTEN__
   ASSERT_TRUE(CreateContextVariable("Enum", "$e", false, "Enum::ONE"));
   EXPECT_THAT(
       EvalWithContext("$e *= 1", vars_),
@@ -2819,8 +2922,10 @@ TEST_F(EvalTest, TestCompositeAssignmentInvalid) {
   ASSERT_TRUE(CreateContextVariable("$i", "1"));
   EXPECT_THAT(EvalWithContext("($i += 1) -= 2", vars_),
               IsError("side effects are not supported in this context"));
+#endif
 }
 
+#ifndef __EMSCRIPTEN__
 TEST_F(EvalTest, TestCompositeAssignmentAdd) {
   ASSERT_TRUE(CreateContextVariable("$i", "1"));
   EXPECT_THAT(EvalWithContext("$i += 1", vars_), IsEqual("2"));
@@ -2840,7 +2945,8 @@ TEST_F(EvalTest, TestCompositeAssignmentAdd) {
   EXPECT_THAT(EvalWithContext("$s += 100000", vars_), IsEqual("-29972"));
 
   ASSERT_TRUE(CreateContextVariable("$p", "(int*)10"));
-  EXPECT_THAT(EvalWithContext("$p += 1", vars_), IsEqual("0x000000000000000e"));
+  EXPECT_THAT(EvalWithContext("$p += 1", vars_),
+              IsEqual(Is32Bit() ? "0x0000000e" : "0x000000000000000e"));
   EXPECT_THAT(
       EvalWithContext("$p += 1.5", vars_),
       IsError("invalid operands to binary expression ('int *' and 'double')"));
@@ -2870,7 +2976,8 @@ TEST_F(EvalTest, TestCompositeAssignmentSub) {
   EXPECT_THAT(EvalWithContext("$s -= 100000", vars_), IsEqual("30172"));
 
   ASSERT_TRUE(CreateContextVariable("$p", "(int*)10"));
-  EXPECT_THAT(EvalWithContext("$p -= 1", vars_), IsEqual("0x0000000000000006"));
+  EXPECT_THAT(EvalWithContext("$p -= 1", vars_),
+              IsEqual(Is32Bit() ? "0x00000006" : "0x0000000000000006"));
 
 #ifdef _WIN32
   // On Windows, 'ptrdiff_t' is 'long long'.
@@ -3022,6 +3129,7 @@ TEST_F(EvalTest, TestSideEffects) {
   EXPECT_THAT(Eval("*p"), IsEqual("5"));
   EXPECT_THAT(Eval("x"), IsEqual("5"));  // `p` is `&x`
 }
+#endif
 
 TEST_F(EvalTest, TestBuiltinFunction_findnonnull) {
   // LLDB doesn't support `__findnonnull` intrinsic function.
@@ -3305,6 +3413,7 @@ TEST_F(EvalTest, TestTypeVsIdentifier) {
           "must use 'enum' tag to refer to type 'CxxEnumOrVar' in this scope"));
 }
 
+#ifndef __EMSCRIPTEN__
 TEST_F(EvalTest, TestSeparateParsing) {
   lldb::SBError error;
 
@@ -3405,6 +3514,7 @@ TEST_F(EvalTest, TestRegistersNoDollar) {
     EXPECT_THAT(Eval(reg_name), IsEqual(reg.GetValue()));
   }
 }
+#endif
 
 TEST_F(EvalTest, TestCharParsing) {
   EXPECT_THAT(Eval("1 + 'A'"), IsEqual("66"));
@@ -3451,6 +3561,7 @@ TEST_F(EvalTest, TestCharParsing) {
   EXPECT_THAT(Eval("'abcdX' == 'abcdY'"), IsEqual("false"));
 }
 
+#ifndef __EMSCRIPTEN__
 TEST_F(EvalTest, TestStringParsing) {
   lldb::SBError ignore;
   // Comparing is done manually (instead of using IsOk and IsEqual matchers).
@@ -3531,3 +3642,4 @@ TEST_F(EvalTest, TestStringParsing) {
               IsError("string literals are not supported"));
   EXPECT_THAT(Eval("*\"abc\""), IsError("string literals are not supported"));
 }
+#endif
