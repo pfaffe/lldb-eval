@@ -306,6 +306,10 @@ void Interpreter::Visit(const LiteralNode* node) {
       return CreateValueFromAPFloat(target, val, type);
     }
     Value operator()(bool val) { return CreateValueFromBool(target, val); }
+    Value operator()(const std::vector<char>& val) {
+      return CreateValueFromBytes(
+          target, reinterpret_cast<const void*>(val.data()), type);
+    }
 
     lldb::SBTarget target;
     lldb::SBType type;
