@@ -5,7 +5,7 @@ on:
 
 jobs:
   benchmarks:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
 
     steps:
       - name: Who triggered this?
@@ -19,8 +19,8 @@ jobs:
           sudo ./llvm.sh 11
           sudo apt install -y llvm-11-dev libclang-11-dev liblldb-11-dev
           echo "LLVM_INSTALL_PATH=/usr/lib/llvm-11" >> $GITHUB_ENV
-          echo "CC=gcc-10" >> $GITHUB_ENV
-          echo "CXX=g++-10" >> $GITHUB_ENV
+          echo "CC=clang-11" >> $GITHUB_ENV
+          echo "CXX=clang++-11" >> $GITHUB_ENV
 
       - name: Checkout
         uses: actions/checkout@v2
@@ -48,7 +48,7 @@ jobs:
 
       - name: Compare results
         run: |
-          git clone --depth 1 --branch "v1.5.3" https://github.com/google/benchmark google_benchmark
+          git clone --depth 1 --branch "v1.7.1" https://github.com/google/benchmark google_benchmark
           cd google_benchmark
 
           # Use python3 to run the compare script, because numpy already dropped
