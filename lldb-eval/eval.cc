@@ -981,12 +981,10 @@ Value Interpreter::EvaluateComparison(BinaryOpKind kind, Value lhs, Value rhs) {
   }
 
   // Must be pointer/integer and/or nullptr comparison.
-  if (target_.GetAddressByteSize() == 4) {
-    bool ret = Compare(kind, static_cast<uint32_t>(lhs.GetUInt64()),
-                       static_cast<uint32_t>(rhs.GetUInt64()));
-    return CreateValueFromBool(target_, ret);
-  }
-  bool ret = Compare(kind, lhs.GetUInt64(), rhs.GetUInt64());
+  size_t ptr_size = target_.GetAddressByteSize();
+
+  bool ret = Compare(kind, lhs.GetInteger().trunc(ptr_size),
+                     rhs.GetInteger().trunc(ptr_size));
   return CreateValueFromBool(target_, ret);
 }
 
