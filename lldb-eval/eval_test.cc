@@ -1975,6 +1975,7 @@ TEST_F(EvalTest, TestBasicTypeDeclaration) {
   EXPECT_THAT(Eval("(char)65"), IsEqual("'A'"));
   EXPECT_THAT(Eval("(char unsigned)65"), IsEqual("'A'"));
   EXPECT_THAT(Eval("(signed char)65"), IsEqual("'A'"));
+#ifndef __EMSCRIPTEN__
   if (sizeof(wchar_t) == 2) {
     // Size of "wchar_t" is 2 bytes on Windows.
     EXPECT_THAT(Eval("(wchar_t)0x4141"), IsEqual("AA"));
@@ -1984,6 +1985,7 @@ TEST_F(EvalTest, TestBasicTypeDeclaration) {
   }
   EXPECT_THAT(Eval("(char16_t)0x4141"), IsEqual("U+4141"));
   EXPECT_THAT(Eval("(char32_t)0x4141"), IsEqual("U+0x00004141"));
+#endif
   EXPECT_THAT(Eval("(int short)-1"), IsEqual("-1"));
   EXPECT_THAT(Eval("(short int)-1"), IsEqual("-1"));
   EXPECT_THAT(Eval("(short)-1"), IsEqual("-1"));
