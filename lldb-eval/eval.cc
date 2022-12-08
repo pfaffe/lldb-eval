@@ -982,7 +982,7 @@ Value Interpreter::EvaluateComparison(BinaryOpKind kind, Value lhs, Value rhs) {
   }
 
   // Must be pointer/integer and/or nullptr comparison.
-  size_t ptr_size = target_.GetAddressByteSize();
+  size_t ptr_size = target_.GetAddressByteSize() * 8;
 
   bool ret = Compare(kind, llvm::APSInt(lhs.GetInteger().trunc(ptr_size), true),
                      llvm::APSInt(rhs.GetInteger().trunc(ptr_size), true));
