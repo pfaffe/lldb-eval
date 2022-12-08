@@ -586,7 +586,7 @@ TEST_F(EvalTest, TestArithmetic) {
   EXPECT_THAT(Eval("(r < r > r)"), IsEqual("false"));
 
   // On Windows sizeof(int) == sizeof(long) == 4.
-  if (sizeof(int) == sizeof(long)) {
+  if constexpr (sizeof(int) == sizeof(long)) {
     EXPECT_THAT(Eval("(unsigned int)4294967295 + (long)2"), IsEqual("1"));
     EXPECT_THAT(Eval("((unsigned int)1 + (long)1) - 3"), IsEqual("4294967295"));
   } else {
@@ -1976,7 +1976,7 @@ TEST_F(EvalTest, TestBasicTypeDeclaration) {
   EXPECT_THAT(Eval("(char unsigned)65"), IsEqual("'A'"));
   EXPECT_THAT(Eval("(signed char)65"), IsEqual("'A'"));
 #ifndef __EMSCRIPTEN__
-  if (sizeof(wchar_t) == 2) {
+  if constexpr (sizeof(wchar_t) == 2) {
     // Size of "wchar_t" is 2 bytes on Windows.
     EXPECT_THAT(Eval("(wchar_t)0x4141"), IsEqual("AA"));
   } else {
@@ -2000,7 +2000,7 @@ TEST_F(EvalTest, TestBasicTypeDeclaration) {
   EXPECT_THAT(Eval("(long)-1"), IsEqual("-1"));
   EXPECT_THAT(Eval("(signed long)-1"), IsEqual("-1"));
   EXPECT_THAT(Eval("(long int signed)-1"), IsEqual("-1"));
-  if (sizeof(long) == 4) {
+  if constexpr (sizeof(long) == 4) {
     // Size of "long" is 4 bytes on Windows.
     EXPECT_THAT(Eval("(unsigned long)-1"), IsEqual("4294967295"));
     EXPECT_THAT(Eval("(int long unsigned)-1"), IsEqual("4294967295"));
